@@ -98,9 +98,14 @@ public sealed class RefreshTokenService(
 
     private async Task RevokeAllAsync(Guid userId, CancellationToken cancellationToken)
     {
-        var active = await db.RefreshTokens.Where(x => x.UserId == userId && x.RevokedAt == null && x.ExpiresAt > DateTimeOffset.UtcNow).ToListAsync(cancellationToken);
+        // SQLite cannot translate all DateTimeOffset comparisons. Keep the DB predicate
+        // provider-neutral, then filter expiration in memory so replay detection behaves
+        // the same on SQLite and PostgreSQL.
+        var candidates = await db.RefreshTokens
+            .Where(x => x.UserId == userId && x.RevokedAt == null)
+            .ToListAsync(cancellationToken);
         var now = DateTimeOffset.UtcNow;
-        foreach (var item in active) item.RevokedAt = now;
+        foreach (var item in candidates.Where(x => x.ExpiresAt > now)) item.RevokedAt = now;
         await db.SaveChangesAsync(cancellationToken);
     }
 
