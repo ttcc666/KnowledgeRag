@@ -201,7 +201,7 @@ export function AppShell() {
   }
 
   return (
-    <div className='min-h-svh'>
+    <div className={isChat ? 'h-svh overflow-hidden' : 'min-h-svh'}>
       <aside className={cn('fixed inset-y-0 left-0 z-40 hidden border-r border-sidebar-border transition-[width] duration-200 md:block', collapsed ? 'w-[76px]' : 'w-[248px]')}>
         {renderSidebar()}
         <button onClick={() => setCollapsed((current) => !current)} className='absolute -right-3 top-20 flex size-6 items-center justify-center rounded-full border bg-background shadow-sm' aria-label={collapsed ? '展开侧边栏' : '折叠侧边栏'}>
@@ -251,7 +251,7 @@ export function AppShell() {
 
         <main className={cn(isChat ? 'h-[calc(100svh-4rem)] overflow-hidden p-3 sm:p-4' : 'mx-auto w-full max-w-[1580px] p-4 sm:p-6 lg:p-8')}>
           <AnimatePresence mode='wait' initial={false}>
-            <motion.div key={pathname} className={isChat ? 'chat-route h-full min-h-0' : undefined} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -3 }} transition={{ duration: 0.18 }}>
+            <motion.div key={pathname} className={isChat ? 'h-full min-h-0' : undefined} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -3 }} transition={{ duration: 0.18 }}>
               <Outlet />
             </motion.div>
           </AnimatePresence>
