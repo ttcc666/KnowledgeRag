@@ -251,7 +251,7 @@ export function AppShell() {
 
         <main className={cn(isChat ? 'h-[calc(100svh-4rem)] overflow-hidden p-3 sm:p-4' : 'mx-auto w-full max-w-[1580px] p-4 sm:p-6 lg:p-8')}>
           <AnimatePresence mode='wait' initial={false}>
-            <motion.div key={pathname} className={isChat ? 'h-full min-h-0' : undefined} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -3 }} transition={{ duration: 0.18 }}>
+            <motion.div key={pathname} className={isChat ? 'chat-route h-full min-h-0' : undefined} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -3 }} transition={{ duration: 0.18 }}>
               <Outlet />
             </motion.div>
           </AnimatePresence>
