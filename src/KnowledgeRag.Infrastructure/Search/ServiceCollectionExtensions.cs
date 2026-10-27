@@ -26,6 +26,7 @@ internal static class ServiceCollectionExtensions
             : sp.GetRequiredService<Bm25SearchService>());
         services.AddScoped<RerankerService>();
         services.AddScoped<KnowledgeSearchService>();
+        services.AddScoped<MultiQuerySearchService>();
         return services;
     }
 }
