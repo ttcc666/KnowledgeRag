@@ -18,7 +18,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: false
       - name: Generate deterministic npm lockfile
         working-directory: src/KnowledgeRag.Admin
         run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
