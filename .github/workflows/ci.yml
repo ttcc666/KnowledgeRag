@@ -8,7 +8,7 @@ on:
 jobs:
   build-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -19,11 +19,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Build shadcn-admin frontend
+          cache: npm
+          cache-dependency-path: src/KnowledgeRag.Admin/package-lock.json
+      - name: Install frontend dependencies
         working-directory: src/KnowledgeRag.Admin
-        run: |
-          npm install --no-audit --no-fund
-          npm run build
+        run: npm ci --no-audit --no-fund
+      - name: Build frontend
+        working-directory: src/KnowledgeRag.Admin
+        run: npm run build
+      - name: Unit and accessibility tests
+        working-directory: src/KnowledgeRag.Admin
+        run: npm test
+      - name: Install Playwright Chromium
+        working-directory: src/KnowledgeRag.Admin
+        run: npx playwright install --with-deps chromium
+      - name: Browser smoke tests
+        working-directory: src/KnowledgeRag.Admin
+        run: npm run test:e2e
       - name: Restore
         run: dotnet restore KnowledgeRag.NonAzure.sln
       - name: Build
@@ -43,25 +55,16 @@ jobs:
     timeout-minutes: 30
     env:
       DATABASE_PROVIDER: PostgreSql
-      DATABASE_CONNECTION_STRING: Host=postgres;Port=5432;Database=knowledge_rag;Username=knowledge_rag;Password=knowledge_rag_dev_password
       POSTGRES_DB: knowledge_rag
       POSTGRES_USER: knowledge_rag
-      POSTGRES_PASSWORD: knowledge_rag_dev_password
       CAP_TRANSPORT: rabbitmq
       CAP_FAILED_RETRY_COUNT: 5
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: 5672
-      RABBITMQ_USER: knowledge_rag
-      RABBITMQ_PASSWORD: knowledge_rag_dev_password
-      CAP_EXCHANGE: knowledge-rag.cap
       SEARCH_VECTOR_BACKEND: pgvector
       SEARCH_LEXICAL_BACKEND: postgres_fts
       STORAGE_PROVIDER: local
-      AUTH_SIGNING_KEY: ci-signing-key-that-is-definitely-more-than-thirty-two-bytes
       OTEL_ENABLED: 'true'
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       RUN_EXTERNAL_BACKEND_TESTS: '1'
-      EXTERNAL_DATABASE_CONNECTION_STRING: Host=localhost;Port=5432;Database=knowledge_rag;Username=knowledge_rag;Password=knowledge_rag_dev_password
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -84,6 +87,12 @@ jobs:
             sleep 2
           done
           docker compose exec -T rabbitmq rabbitmq-diagnostics -q ping
+      - name: Export native backend connection strings
+        shell: bash
+        run: |
+          DB_SECRET="$(docker compose exec -T postgres sh -lc 'printf %s "$POSTGRES_PASSWORD"')"
+          printf 'DATABASE_CONNECTION_STRING=Host=postgres;Port=5432;Database=%s;Username=%s;Password=%s\n' "$POSTGRES_DB" "$POSTGRES_USER" "$DB_SECRET" >> "$GITHUB_ENV"
+          printf 'EXTERNAL_DATABASE_CONNECTION_STRING=Host=localhost;Port=5432;Database=%s;Username=%s;Password=%s\n' "$POSTGRES_DB" "$POSTGRES_USER" "$DB_SECRET" >> "$GITHUB_ENV"
       - name: Build and start application with native backends and CAP RabbitMQ
         run: docker compose --profile postgres --profile cap --profile otel up -d --build app
       - name: Readiness check
