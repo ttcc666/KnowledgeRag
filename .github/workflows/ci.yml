@@ -40,13 +40,20 @@ jobs:
 
   native-backends-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     env:
       DATABASE_PROVIDER: PostgreSql
       DATABASE_CONNECTION_STRING: Host=postgres;Port=5432;Database=knowledge_rag;Username=knowledge_rag;Password=knowledge_rag_dev_password
       POSTGRES_DB: knowledge_rag
       POSTGRES_USER: knowledge_rag
       POSTGRES_PASSWORD: knowledge_rag_dev_password
+      CAP_TRANSPORT: rabbitmq
+      CAP_FAILED_RETRY_COUNT: 5
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: knowledge_rag
+      RABBITMQ_PASSWORD: knowledge_rag_dev_password
+      CAP_EXCHANGE: knowledge-rag.cap
       SEARCH_VECTOR_BACKEND: pgvector
       SEARCH_LEXICAL_BACKEND: postgres_fts
       STORAGE_PROVIDER: local
@@ -62,19 +69,23 @@ jobs:
           dotnet-version: '10.0.x'
           cache: true
           cache-dependency-path: '**/*.csproj'
-      - name: Start PostgreSQL and OpenTelemetry
-        run: docker compose --profile postgres --profile otel up -d postgres otel-collector
-      - name: Wait for PostgreSQL
+      - name: Start PostgreSQL, RabbitMQ and OpenTelemetry
+        run: docker compose --profile postgres --profile cap --profile otel up -d postgres rabbitmq otel-collector
+      - name: Wait for PostgreSQL and RabbitMQ
         shell: bash
         run: |
           for i in {1..40}; do
-            if docker compose exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; then exit 0; fi
+            if docker compose exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; then break; fi
             sleep 2
           done
-          docker compose logs postgres
-          exit 1
-      - name: Build and start application with native backends
-        run: docker compose --profile postgres --profile otel up -d --build app
+          docker compose exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+          for i in {1..40}; do
+            if docker compose exec -T rabbitmq rabbitmq-diagnostics -q ping; then break; fi
+            sleep 2
+          done
+          docker compose exec -T rabbitmq rabbitmq-diagnostics -q ping
+      - name: Build and start application with native backends and CAP RabbitMQ
+        run: docker compose --profile postgres --profile cap --profile otel up -d --build app
       - name: Readiness check
         shell: bash
         run: |
@@ -86,13 +97,15 @@ jobs:
             fi
             sleep 2
           done
-          docker compose logs app postgres otel-collector
+          docker compose logs app postgres rabbitmq otel-collector
           exit 1
+      - name: Verify CAP PostgreSQL schema exists
+        run: docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select table_schema, table_name from information_schema.tables where table_schema = 'cap' order by table_name;" | tee /tmp/cap-tables.txt && grep -q cap /tmp/cap-tables.txt
       - name: Exercise pgvector and PostgreSQL FTS through project code
         run: dotnet test tests/KnowledgeRag.Api.IntegrationTests/KnowledgeRag.Api.IntegrationTests.csproj -c Release --filter Category=ExternalBackend
       - name: Logs on failure
         if: failure()
-        run: docker compose logs app postgres otel-collector
+        run: docker compose logs app postgres rabbitmq otel-collector
       - name: Shutdown
         if: always()
-        run: docker compose --profile postgres --profile otel down -v
+        run: docker compose --profile postgres --profile cap --profile otel down -v

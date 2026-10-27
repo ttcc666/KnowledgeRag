@@ -25,6 +25,24 @@ services:
       timeout: 5s
       retries: 20
 
+  rabbitmq:
+    image: rabbitmq:4.1-management
+    profiles: ["cap"]
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-knowledge_rag}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-knowledge_rag_dev_password}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
   minio:
     image: quay.io/minio/minio:latest
     profiles: ["s3"]
@@ -72,6 +90,14 @@ services:
       DATABASE__PROVIDER: ${DATABASE_PROVIDER:-Sqlite}
       DATABASE__CONNECTIONSTRING: ${DATABASE_CONNECTION_STRING:-Data Source=/app/App_Data/knowledge.db}
       DATABASE__AUTOMIGRATE: ${DATABASE_AUTO_MIGRATE:-true}
+      CAP__TRANSPORT: ${CAP_TRANSPORT:-inmemory}
+      CAP__FAILEDRETRYCOUNT: ${CAP_FAILED_RETRY_COUNT:-20}
+      CAP__RABBITMQ__HOSTNAME: ${RABBITMQ_HOST:-rabbitmq}
+      CAP__RABBITMQ__PORT: ${RABBITMQ_PORT:-5672}
+      CAP__RABBITMQ__USERNAME: ${RABBITMQ_USER:-knowledge_rag}
+      CAP__RABBITMQ__PASSWORD: ${RABBITMQ_PASSWORD:-knowledge_rag_dev_password}
+      CAP__RABBITMQ__VIRTUALHOST: ${RABBITMQ_VHOST:-/}
+      CAP__RABBITMQ__EXCHANGENAME: ${CAP_EXCHANGE:-knowledge-rag.cap}
       SEARCHBACKEND__VECTOR: ${SEARCH_VECTOR_BACKEND:-qdrant}
       SEARCHBACKEND__LEXICAL: ${SEARCH_LEXICAL_BACKEND:-bm25}
       SEARCHBACKEND__POSTGRESFTSCONFIGURATION: ${POSTGRES_FTS_CONFIG:-simple}
@@ -109,5 +135,6 @@ services:
 volumes:
   qdrant-data:
   postgres-data:
+  rabbitmq-data:
   minio-data:
   app-data:
