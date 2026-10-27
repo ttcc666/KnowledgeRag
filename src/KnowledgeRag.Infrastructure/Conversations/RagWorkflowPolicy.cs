@@ -12,18 +12,8 @@ public static class RagWorkflowPolicy
 
         var limit = Math.Clamp(maxQueries, 1, 8);
         normalized.Queries = normalized.RequiresKnowledge
-            ? (normalized.Queries ?? [])
-                .Append(originalQuestion)
-                .Select(x => x?.Trim())
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Take(limit)
-                .Cast<string>()
-                .ToList()
+            ? BuildQueries(originalQuestion, normalized.Queries, limit)
             : [];
-
-        if (normalized.RequiresKnowledge && normalized.Queries.Count == 0)
-            normalized.Queries = [originalQuestion];
 
         return normalized;
     }
@@ -52,18 +42,27 @@ public static class RagWorkflowPolicy
     public static IReadOnlyList<string> SupplementalQueries(EvidenceReview? review, string originalQuestion, int maxQueries)
     {
         var candidates = (review?.SupplementalQueries ?? [])
-            .Concat(review?.MissingEvidence ?? [])
-            .Append(originalQuestion);
-
-        return candidates
-            .Select(x => x?.Trim())
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(Math.Clamp(maxQueries, 1, 8))
-            .Cast<string>()
-            .ToList();
+            .Concat(review?.MissingEvidence ?? []);
+        return BuildQueries(originalQuestion, candidates, Math.Clamp(maxQueries, 1, 8));
     }
 
     public static string SafeUnsupportedAnswer()
         => "基于当前知识库证据，我无法可靠支持完整回答。知识库中没有找到足够信息，请补充资料或缩小问题范围后重试。";
+
+    private static List<string> BuildQueries(string originalQuestion, IEnumerable<string>? variants, int limit)
+    {
+        var original = originalQuestion.Trim();
+        var result = new List<string>(limit);
+        if (!string.IsNullOrWhiteSpace(original)) result.Add(original);
+
+        foreach (var variant in variants ?? [])
+        {
+            var query = variant?.Trim();
+            if (string.IsNullOrWhiteSpace(query) || result.Contains(query, StringComparer.OrdinalIgnoreCase)) continue;
+            if (result.Count >= limit) break;
+            result.Add(query);
+        }
+
+        return result;
+    }
 }
