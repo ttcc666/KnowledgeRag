@@ -14,7 +14,8 @@ public sealed record IngestionJobSummary(
     string? LastError,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    double ElapsedSeconds);
+    double ElapsedSeconds,
+    int? QueuePosition);
 
 public sealed record RetrievalMetricsSummary(
     long QueryCount,
