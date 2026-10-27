@@ -1,3 +1,4 @@
+using DotNetCore.CAP;
 using Microsoft.AspNetCore.Http;
 using KnowledgeRag.Infrastructure.Persistence;
 using KnowledgeRag.Application.Contracts;
@@ -5,6 +6,7 @@ using KnowledgeRag.Application.Security;
 using KnowledgeRag.Domain.Entities;
 using KnowledgeRag.Infrastructure.Configuration;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace KnowledgeRag.Infrastructure.Documents;
@@ -16,17 +18,17 @@ public sealed class KnowledgeIngestionService(
     TextChunker chunker,
     OpenAiCompatibleEmbeddingService embeddings,
     IVectorStore vectorStore,
-    IOptions<RagOptions> ragOptions)
+    ICapPublisher capPublisher,
+    IDocumentProcessingNotifier notifier,
+    IOptions<RagOptions> ragOptions,
+    IOptions<DatabaseOptions> databaseOptions,
+    ILogger<KnowledgeIngestionService> logger)
 {
     private readonly RagOptions _rag = ragOptions.Value;
+    private readonly DatabaseOptions _database = databaseOptions.Value;
 
-    public async Task<DocumentEntity> IngestAsync(Guid knowledgeBaseId, Guid userId, IFormFile file, CancellationToken cancellationToken = default)
+    public async Task<DocumentEntity> QueueAsync(Guid knowledgeBaseId, Guid userId, IFormFile file, CancellationToken cancellationToken = default)
     {
-        using var activity = Telemetry.ActivitySource.StartActivity("rag.ingest");
-        activity?.SetTag("rag.knowledge_base_id", knowledgeBaseId.ToString());
-        activity?.SetTag("rag.file_name", Path.GetFileName(file.FileName));
-        activity?.SetTag("rag.file_size", file.Length);
-
         if (file.Length == 0) throw new InvalidOperationException("文件为空。");
         if (file.Length > _rag.MaxUploadMegabytes * 1024L * 1024L) throw new InvalidOperationException($"文件超过 {_rag.MaxUploadMegabytes} MB 限制。");
         if (!parser.Supports(file.FileName)) throw new InvalidOperationException("暂不支持该文件格式。支持 txt/md/csv/json/xml/html/pdf/docx。");
@@ -35,72 +37,67 @@ public sealed class KnowledgeIngestionService(
         var saved = await fileStorage.SaveAsync(knowledgeBaseId, documentId, file, cancellationToken);
         try
         {
-            var duplicate = await db.Documents.AsNoTracking().AnyAsync(x => x.KnowledgeBaseId == knowledgeBaseId && x.Sha256 == saved.Sha256 && x.Status == DocumentStatus.Ready, cancellationToken);
+            var duplicate = await db.Documents.AsNoTracking().AnyAsync(
+                x => x.KnowledgeBaseId == knowledgeBaseId && x.Sha256 == saved.Sha256 && x.Status != DocumentStatus.Failed,
+                cancellationToken);
             if (duplicate)
             {
                 await fileStorage.DeleteAsync(knowledgeBaseId, saved.StorageKey, cancellationToken);
-                throw new InvalidOperationException("该知识库中已存在内容相同的文档。");
+                throw new InvalidOperationException("该知识库中已存在内容相同或正在处理的文档。");
             }
 
             var now = DateTimeOffset.UtcNow;
             var document = new DocumentEntity
             {
-                Id = documentId, KnowledgeBaseId = knowledgeBaseId, CreatedByUserId = userId, FileName = Path.GetFileName(file.FileName),
+                Id = documentId,
+                KnowledgeBaseId = knowledgeBaseId,
+                CreatedByUserId = userId,
+                FileName = Path.GetFileName(file.FileName),
                 ContentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType,
-                StoredFileName = saved.StorageKey, Sha256 = saved.Sha256, SizeBytes = file.Length, Status = DocumentStatus.Processing, CreatedAt = now, UpdatedAt = now
+                StoredFileName = saved.StorageKey,
+                Sha256 = saved.Sha256,
+                SizeBytes = file.Length,
+                Status = DocumentStatus.Queued,
+                CreatedAt = now,
+                UpdatedAt = now
             };
-            db.Documents.Add(document);
-            await db.SaveChangesAsync(cancellationToken);
+            var message = new DocumentIndexRequested(document.Id, knowledgeBaseId, userId);
 
-            var pointIds = new List<Guid>();
             try
             {
-                var text = await parser.ExtractTextAsync(saved.ParseFilePath, cancellationToken);
-                var chunks = chunker.Split(text);
-                if (chunks.Count == 0) throw new InvalidOperationException("没有从文件中提取到可索引文本。");
-                activity?.SetTag("rag.chunk_count", chunks.Count);
-
-                var chunkEntities = new List<DocumentChunkEntity>(chunks.Count);
-                for (var offset = 0; offset < chunks.Count; offset += _rag.EmbeddingBatchSize)
+                if (_database.Provider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
                 {
-                    var batch = chunks.Skip(offset).Take(_rag.EmbeddingBatchSize).ToList();
-                    var vectors = await embeddings.GenerateBatchAsync(batch, cancellationToken);
-                    var points = new List<VectorPoint>(batch.Count);
-                    for (var i = 0; i < batch.Count; i++)
-                    {
-                        var chunkId = Guid.NewGuid();
-                        pointIds.Add(chunkId);
-                        var chunkIndex = offset + i;
-                        chunkEntities.Add(new DocumentChunkEntity
-                        {
-                            Id = chunkId, KnowledgeBaseId = knowledgeBaseId, DocumentId = document.Id, ChunkIndex = chunkIndex,
-                            Text = batch[i], CharacterCount = batch[i].Length, CreatedAt = DateTimeOffset.UtcNow
-                        });
-                        points.Add(new VectorPoint(chunkId, knowledgeBaseId, document.Id, document.FileName, chunkIndex, vectors[i]));
-                    }
-                    foreach (var upsertBatch in points.Chunk(_rag.UpsertBatchSize)) await vectorStore.UpsertAsync(upsertBatch, cancellationToken);
+                    using var transaction = db.Database.BeginTransaction(capPublisher, autoCommit: false);
+                    db.Documents.Add(document);
+                    await db.SaveChangesAsync(cancellationToken);
+                    await capPublisher.PublishAsync(DocumentEventTopics.IndexRequested, message);
+                    transaction.Commit();
                 }
-
-                db.DocumentChunks.AddRange(chunkEntities);
-                document.ChunkCount = chunkEntities.Count;
-                document.Status = DocumentStatus.Ready;
-                document.LastError = null;
-                document.UpdatedAt = DateTimeOffset.UtcNow;
-                await db.SaveChangesAsync(cancellationToken);
-                return document;
+                else
+                {
+                    db.Documents.Add(document);
+                    await db.SaveChangesAsync(cancellationToken);
+                    await capPublisher.PublishAsync(DocumentEventTopics.IndexRequested, message);
+                }
             }
-            catch (Exception ex)
+            catch
             {
-                activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Error, ex.Message);
-                if (pointIds.Count > 0) { try { await vectorStore.DeleteAsync(pointIds, cancellationToken); } catch { } }
-                foreach (var entry in db.ChangeTracker.Entries<DocumentChunkEntity>().Where(x => x.Entity.DocumentId == document.Id).ToList()) entry.State = EntityState.Detached;
-                document.Status = DocumentStatus.Failed;
-                document.LastError = ex.Message.Length <= 4000 ? ex.Message : ex.Message[..4000];
-                document.ChunkCount = 0;
-                document.UpdatedAt = DateTimeOffset.UtcNow;
-                await db.SaveChangesAsync(CancellationToken.None);
+                if (db.Entry(document).State != EntityState.Detached)
+                {
+                    db.ChangeTracker.Clear();
+                    var persisted = await db.Documents.SingleOrDefaultAsync(x => x.Id == document.Id, CancellationToken.None);
+                    if (persisted is not null)
+                    {
+                        db.Documents.Remove(persisted);
+                        await db.SaveChangesAsync(CancellationToken.None);
+                    }
+                }
+                await fileStorage.DeleteAsync(knowledgeBaseId, saved.StorageKey, CancellationToken.None);
                 throw;
             }
+
+            await NotifySafeAsync(document, 0, "queued", cancellationToken);
+            return document;
         }
         finally
         {
@@ -108,18 +105,126 @@ public sealed class KnowledgeIngestionService(
         }
     }
 
+    public async Task ProcessAsync(DocumentIndexRequested request, CancellationToken cancellationToken = default)
+    {
+        using var activity = Telemetry.ActivitySource.StartActivity("rag.ingest.background");
+        activity?.SetTag("rag.document_id", request.DocumentId.ToString());
+        activity?.SetTag("rag.knowledge_base_id", request.KnowledgeBaseId.ToString());
+
+        var document = await db.Documents.SingleOrDefaultAsync(
+            x => x.Id == request.DocumentId && x.KnowledgeBaseId == request.KnowledgeBaseId,
+            cancellationToken);
+        if (document is null || document.Status == DocumentStatus.Ready) return;
+
+        var currentPointIds = new List<Guid>();
+        string? parsePath = null;
+        try
+        {
+            document.Status = DocumentStatus.Processing;
+            document.LastError = null;
+            document.UpdatedAt = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(cancellationToken);
+            await NotifySafeAsync(document, 5, "processing", cancellationToken);
+
+            await using var source = await fileStorage.OpenReadAsync(document.KnowledgeBaseId, document.StoredFileName, cancellationToken)
+                ?? throw new FileNotFoundException("原始文档文件不存在，无法继续索引。", document.FileName);
+            parsePath = Path.Combine(Path.GetTempPath(), $"knowledge-rag-{document.Id:N}{Path.GetExtension(document.FileName)}");
+            await using (var target = File.Create(parsePath))
+                await source.CopyToAsync(target, cancellationToken);
+
+            await NotifySafeAsync(document, 15, "parsing", cancellationToken);
+            var text = await parser.ExtractTextAsync(parsePath, cancellationToken);
+            await NotifySafeAsync(document, 30, "chunking", cancellationToken);
+            var chunks = chunker.Split(text);
+            if (chunks.Count == 0) throw new InvalidOperationException("没有从文件中提取到可索引文本。");
+            activity?.SetTag("rag.chunk_count", chunks.Count);
+
+            var previousChunks = await db.DocumentChunks.Where(x => x.DocumentId == document.Id).ToListAsync(cancellationToken);
+            if (previousChunks.Count > 0)
+            {
+                await vectorStore.DeleteAsync(previousChunks.Select(x => x.Id).ToList(), cancellationToken);
+                db.DocumentChunks.RemoveRange(previousChunks);
+                await db.SaveChangesAsync(cancellationToken);
+            }
+
+            var chunkEntities = new List<DocumentChunkEntity>(chunks.Count);
+            for (var offset = 0; offset < chunks.Count; offset += _rag.EmbeddingBatchSize)
+            {
+                var batch = chunks.Skip(offset).Take(_rag.EmbeddingBatchSize).ToList();
+                var vectors = await embeddings.GenerateBatchAsync(batch, cancellationToken);
+                var points = new List<VectorPoint>(batch.Count);
+                for (var i = 0; i < batch.Count; i++)
+                {
+                    var chunkId = Guid.NewGuid();
+                    currentPointIds.Add(chunkId);
+                    var chunkIndex = offset + i;
+                    chunkEntities.Add(new DocumentChunkEntity
+                    {
+                        Id = chunkId,
+                        KnowledgeBaseId = document.KnowledgeBaseId,
+                        DocumentId = document.Id,
+                        ChunkIndex = chunkIndex,
+                        Text = batch[i],
+                        CharacterCount = batch[i].Length,
+                        CreatedAt = DateTimeOffset.UtcNow
+                    });
+                    points.Add(new VectorPoint(chunkId, document.KnowledgeBaseId, document.Id, document.FileName, chunkIndex, vectors[i]));
+                }
+                foreach (var upsertBatch in points.Chunk(_rag.UpsertBatchSize))
+                    await vectorStore.UpsertAsync(upsertBatch, cancellationToken);
+
+                var completed = Math.Min(offset + batch.Count, chunks.Count);
+                var progress = 40 + (int)Math.Round(45d * completed / chunks.Count);
+                await NotifySafeAsync(document, progress, "embedding", cancellationToken, chunkEntities.Count);
+            }
+
+            await NotifySafeAsync(document, 90, "storing", cancellationToken, chunkEntities.Count);
+            db.DocumentChunks.AddRange(chunkEntities);
+            document.ChunkCount = chunkEntities.Count;
+            document.Status = DocumentStatus.Ready;
+            document.LastError = null;
+            document.UpdatedAt = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(cancellationToken);
+            await NotifySafeAsync(document, 100, "completed", cancellationToken, document.ChunkCount);
+        }
+        catch (Exception ex)
+        {
+            activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Error, ex.Message);
+            if (currentPointIds.Count > 0)
+            {
+                try { await vectorStore.DeleteAsync(currentPointIds, CancellationToken.None); }
+                catch (Exception cleanupEx) { logger.LogWarning(cleanupEx, "Failed to clean vectors for document {DocumentId}", document.Id); }
+            }
+
+            foreach (var entry in db.ChangeTracker.Entries<DocumentChunkEntity>().Where(x => x.Entity.DocumentId == document.Id).ToList())
+                entry.State = EntityState.Detached;
+            document.Status = DocumentStatus.Failed;
+            document.LastError = ex.Message.Length <= 4000 ? ex.Message : ex.Message[..4000];
+            document.ChunkCount = 0;
+            document.UpdatedAt = DateTimeOffset.UtcNow;
+            try { await db.SaveChangesAsync(CancellationToken.None); }
+            catch (Exception saveEx) { logger.LogError(saveEx, "Failed to persist indexing failure for document {DocumentId}", document.Id); }
+            await NotifySafeAsync(document, 100, "failed", CancellationToken.None, error: document.LastError);
+            throw;
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(parsePath) && File.Exists(parsePath))
+            {
+                try { File.Delete(parsePath); } catch { }
+            }
+        }
+    }
+
     public async Task<IReadOnlyList<DocumentEntity>> ListAsync(Guid knowledgeBaseId, CancellationToken cancellationToken = default)
     {
-        var rows = await db.Documents.AsNoTracking()
-            .Where(x => x.KnowledgeBaseId == knowledgeBaseId)
-            .ToListAsync(cancellationToken);
+        var rows = await db.Documents.AsNoTracking().Where(x => x.KnowledgeBaseId == knowledgeBaseId).ToListAsync(cancellationToken);
         return rows.OrderByDescending(x => x.CreatedAt).ToList();
     }
 
     public async Task<DocumentDownload?> OpenReadAsync(Guid knowledgeBaseId, Guid documentId, CancellationToken cancellationToken = default)
     {
-        var document = await db.Documents.AsNoTracking()
-            .SingleOrDefaultAsync(x => x.Id == documentId && x.KnowledgeBaseId == knowledgeBaseId, cancellationToken);
+        var document = await db.Documents.AsNoTracking().SingleOrDefaultAsync(x => x.Id == documentId && x.KnowledgeBaseId == knowledgeBaseId, cancellationToken);
         if (document is null) return null;
         var stream = await fileStorage.OpenReadAsync(knowledgeBaseId, document.StoredFileName, cancellationToken);
         return stream is null ? null : new DocumentDownload(stream, document.ContentType, document.FileName);
@@ -129,12 +234,35 @@ public sealed class KnowledgeIngestionService(
     {
         var document = await db.Documents.SingleOrDefaultAsync(x => x.Id == documentId && x.KnowledgeBaseId == knowledgeBaseId, cancellationToken);
         if (document is null) return false;
+        if (document.Status is DocumentStatus.Queued or DocumentStatus.Processing)
+            throw new InvalidOperationException("文档正在后台索引，完成或失败后才能删除。");
         var pointIds = await db.DocumentChunks.AsNoTracking().Where(x => x.DocumentId == documentId).Select(x => x.Id).ToListAsync(cancellationToken);
         await vectorStore.DeleteAsync(pointIds, cancellationToken);
         await fileStorage.DeleteAsync(knowledgeBaseId, document.StoredFileName, cancellationToken);
         db.Documents.Remove(document);
         await db.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    private async Task NotifySafeAsync(DocumentEntity document, int progress, string stage, CancellationToken cancellationToken, int? chunkCount = null, string? error = null)
+    {
+        try
+        {
+            await notifier.NotifyAsync(new DocumentProcessingNotification(
+                document.Id,
+                document.KnowledgeBaseId,
+                document.FileName,
+                document.Status,
+                Math.Clamp(progress, 0, 100),
+                stage,
+                chunkCount ?? document.ChunkCount,
+                error,
+                DateTimeOffset.UtcNow), cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "SignalR document notification failed for {DocumentId}", document.Id);
+        }
     }
 }
 

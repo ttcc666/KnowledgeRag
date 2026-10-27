@@ -1,3 +1,4 @@
+global using KnowledgeRag.Application.Abstractions;
 global using KnowledgeRag.Application.Contracts;
 global using KnowledgeRag.Application.Security;
 global using KnowledgeRag.Domain.Entities;

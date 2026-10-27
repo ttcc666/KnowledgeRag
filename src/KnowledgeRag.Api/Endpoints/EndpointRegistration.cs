@@ -1,3 +1,5 @@
+using KnowledgeRag.Api.Realtime;
+
 namespace KnowledgeRag.Api.Endpoints;
 
 public static class EndpointRegistration
@@ -11,6 +13,7 @@ public static class EndpointRegistration
         app.MapDocumentEndpoints();
         app.MapSearchEndpoints();
         app.MapConversationEndpoints();
+        app.MapHub<DocumentProcessingHub>("/hubs/documents");
         return app;
     }
 }

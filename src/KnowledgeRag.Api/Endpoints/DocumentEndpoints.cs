@@ -27,8 +27,8 @@ public static class DocumentEndpoints
         {
             var actor = HttpActorContext.From(principal);
             await access.RequireAsync(actor, knowledgeBaseId, KnowledgeBaseRole.Editor, ct);
-            var document = await ingestion.IngestAsync(knowledgeBaseId, actor.UserId, file, ct);
-            return Results.Ok(new UploadResponse(document.Id, document.FileName, document.ChunkCount, document.Sha256, document.Status));
+            var document = await ingestion.QueueAsync(knowledgeBaseId, actor.UserId, file, ct);
+            return Results.Accepted(value: new UploadResponse(document.Id, document.FileName, document.ChunkCount, document.Sha256, document.Status));
         }).DisableAntiforgery();
 
         group.MapGet("/{documentId:guid}/file", async (Guid knowledgeBaseId, Guid documentId, ClaimsPrincipal principal, KnowledgeBaseAccessService access, KnowledgeIngestionService ingestion, CancellationToken ct) =>

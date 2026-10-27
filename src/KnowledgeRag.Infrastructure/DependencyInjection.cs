@@ -4,6 +4,7 @@ using KnowledgeRag.Infrastructure.Conversations;
 using KnowledgeRag.Infrastructure.Documents;
 using KnowledgeRag.Infrastructure.Identity;
 using KnowledgeRag.Infrastructure.KnowledgeBases;
+using KnowledgeRag.Infrastructure.Messaging;
 using KnowledgeRag.Infrastructure.Persistence;
 using KnowledgeRag.Infrastructure.Search;
 using KnowledgeRag.Infrastructure.Storage;
@@ -30,6 +31,7 @@ public static class DependencyInjection
         services.AddKnowledgeBaseModule();
         services.AddDocumentModule(configuration);
         services.AddConversationModule();
+        services.AddMessagingModule(configuration);
         return services;
     }
 
