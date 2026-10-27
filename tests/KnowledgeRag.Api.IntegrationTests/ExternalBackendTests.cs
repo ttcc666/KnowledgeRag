@@ -17,12 +17,13 @@ namespace KnowledgeRag.Api.IntegrationTests;
 
 public sealed class ExternalBackendTests
 {
-    private static bool Enabled => Environment.GetEnvironmentVariable("RUN_EXTERNAL_BACKEND_TESTS") == "1";
+    private static bool BackendEnabled => Environment.GetEnvironmentVariable("RUN_EXTERNAL_BACKEND_TESTS") == "1";
+    private static bool S3Enabled => Environment.GetEnvironmentVariable("RUN_EXTERNAL_S3_TESTS") == "1";
 
     [Fact, Trait("Category", "ExternalBackend")]
     public async Task Minio_S3FileStorage_RoundTripsObject()
     {
-        if (!Enabled) return;
+        if (!S3Enabled) return;
         var root = Path.Combine(Path.GetTempPath(), $"knowledge-rag-s3-tests-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
         try
@@ -76,7 +77,7 @@ public sealed class ExternalBackendTests
     [Fact, Trait("Category", "ExternalBackend")]
     public async Task PgVectorStore_UpsertSearchDelete_Works()
     {
-        if (!Enabled) return;
+        if (!BackendEnabled) return;
         var connection = ExternalConnectionString();
         var vectorStore = new PgVectorStore(
             Options.Create(new DatabaseOptions { Provider = "PostgreSql", ConnectionString = connection }),
@@ -108,7 +109,7 @@ public sealed class ExternalBackendTests
     [Fact, Trait("Category", "ExternalBackend")]
     public async Task PostgresFts_FindsPersistedReadyChunk()
     {
-        if (!Enabled) return;
+        if (!BackendEnabled) return;
         var connection = ExternalConnectionString();
         var dbOptions = new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(connection).Options;
         await using var db = new AppDbContext(dbOptions);
