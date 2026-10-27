@@ -17,11 +17,16 @@ public sealed class TenantService(AppDbContext db, TenantAccessService access, I
             return await db.Tenants.AsNoTracking().Where(x => x.Id == actor.TenantId.Value)
                 .Select(x => new TenantSummary(x.Id, x.Name, x.Slug, role, x.CreatedAt, x.UpdatedAt)).ToListAsync(ct);
         }
-        return await (from tenant in db.Tenants.AsNoTracking()
-                      join member in db.TenantMembers.AsNoTracking() on tenant.Id equals member.TenantId
-                      where member.UserId == actor.UserId
-                      orderby tenant.UpdatedAt descending
-                      select new TenantSummary(tenant.Id, tenant.Name, tenant.Slug, member.Role, tenant.CreatedAt, tenant.UpdatedAt)).ToListAsync(ct);
+
+        var rows = await (from tenant in db.Tenants.AsNoTracking()
+                          join member in db.TenantMembers.AsNoTracking() on tenant.Id equals member.TenantId
+                          where member.UserId == actor.UserId
+                          select new TenantSummary(tenant.Id, tenant.Name, tenant.Slug, member.Role, tenant.CreatedAt, tenant.UpdatedAt))
+            .ToListAsync(ct);
+
+        // SQLite cannot ORDER BY DateTimeOffset expressions. Sorting the usually-small
+        // tenant list in memory keeps behavior identical across SQLite and PostgreSQL.
+        return rows.OrderByDescending(x => x.UpdatedAt).ToList();
     }
 
     public async Task<TenantEntity> CreateAsync(ActorContext actor, CreateTenantRequest request, CancellationToken ct = default)
