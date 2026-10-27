@@ -1,4 +1,5 @@
 using Microsoft.Agents.AI;
+using Xunit;
 
 namespace KnowledgeRag.Api.IntegrationTests;
 
