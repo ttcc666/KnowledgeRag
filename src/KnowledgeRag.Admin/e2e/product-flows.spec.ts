@@ -21,6 +21,7 @@ async function mockProductApi(page: Page) {
     if (path === '/api/knowledge-bases') return route.fulfill({ json: [{ id: 'kb1', tenantId: 't1', name: 'Product KB', description: 'Enterprise knowledge', role: 'Owner', createdAt: '2026-10-27T00:00:00Z', updatedAt: '2026-10-27T00:00:00Z' }] })
     if (path === '/api/ingestion/jobs') return route.fulfill({ json: [{ documentId: 'd2', knowledgeBaseId: 'kb1', knowledgeBaseName: 'Product KB', fileName: 'failed.pdf', status: 'Failed', chunkCount: 0, lastError: 'embedding timeout', createdAt: '2026-10-27T00:00:00Z', updatedAt: '2026-10-27T00:01:00Z', elapsedSeconds: 60 }] })
     if (/\/api\/knowledge-bases\/kb1\/documents\/d2\/(retry|reindex|cancel)$/.test(path)) return route.fulfill({ status: 202, json: {} })
+    if (path === '/api/knowledge-bases/kb1/documents/d1/file') return route.fulfill({ status: 200, contentType: 'application/pdf', body: '%PDF-test' })
     if (path === '/api/conversations' && route.request().method() === 'GET') return route.fulfill({ json: [{ id: 'c1', knowledgeBaseId: 'kb1', title: 'Policy', createdAt: '2026-10-27T00:00:00Z', updatedAt: '2026-10-27T00:00:00Z' }] })
     if (path === '/api/conversations/c1/messages') return route.fulfill({ json: streamed ? [{ id: 'm1', role: 'user', content: 'What is the policy?', createdAt: '2026-10-27T00:00:00Z' }, { id: 'm2', role: 'assistant', content: 'The policy answer.', sourcesJson: JSON.stringify([{ documentId: 'd1', fileName: 'handbook.pdf', chunkIndex: 3, sourceLink: '/file', score: .94, excerpt: 'Employees receive the documented benefit.', pageNumber: 7, vectorScore: .91, bm25Score: 5.4, fusionScore: .031, rerankScore: .94 }]), createdAt: '2026-10-27T00:00:01Z' }] : [] })
     if (path === '/api/conversations/c1/messages/stream') {
@@ -48,13 +49,21 @@ test('failed ingestion can be retried from operations', async ({ page }) => {
   await request
 })
 
-test('chat streams and exposes auditable source evidence', async ({ page }) => {
+test('chat stays in the viewport and exposes auditable source evidence', async ({ page }) => {
   await page.goto('/chat')
   const composer = page.getByPlaceholder('询问当前知识库…')
   await composer.fill('What is the policy?')
   await composer.press('Enter')
   await expect(page.getByText('The policy answer.')).toBeVisible()
+
+  const documentScrolls = await page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight + 2)
+  expect(documentScrolls).toBeFalsy()
+
   await page.getByRole('button', { name: /handbook\.pdf/ }).click()
   await expect(page.getByText('Employees receive the documented benefit.').last()).toBeVisible()
   await expect(page.getByText('0.9400').last()).toBeVisible()
+
+  const sourceRequest = page.waitForRequest((request) => request.url().endsWith('/api/knowledge-bases/kb1/documents/d1/file'))
+  await page.getByRole('button', { name: '打开原始文档' }).click()
+  await sourceRequest
 })
