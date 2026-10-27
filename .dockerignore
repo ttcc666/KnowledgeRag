@@ -1,0 +1,9 @@
+**/bin
+**/obj
+**/node_modules
+**/dist
+.git
+.vs
+.idea
+.env
+src/KnowledgeRag.Api/App_Data

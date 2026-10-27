@@ -1,0 +1,18 @@
+import { useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
+import { Database, Plus } from 'lucide-react'
+import { toast } from 'sonner'
+import { api, getErrorMessage } from '@/lib/api'
+import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, EmptyState, Input, Label, PageHeader, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea } from '@/components/ui'
+
+export function KnowledgeBaseListPage() {
+  const qc = useQueryClient(); const [open, setOpen] = useState(false); const [name, setName] = useState(''); const [description, setDescription] = useState(''); const [tenantId, setTenantId] = useState('')
+  const kbs = useQuery({ queryKey: ['knowledge-bases'], queryFn: api.knowledgeBases.list })
+  const tenants = useQuery({ queryKey: ['tenants'], queryFn: api.tenants.list })
+  const create = useMutation({ mutationFn: () => api.knowledgeBases.create({ name, description: description || undefined, tenantId: tenantId || undefined }), onSuccess: async () => { toast.success('知识库已创建'); setOpen(false); setName(''); setDescription(''); setTenantId(''); await qc.invalidateQueries({ queryKey: ['knowledge-bases'] }) }, onError: (e) => toast.error(getErrorMessage(e)) })
+  return <div className='space-y-6'><PageHeader title='知识库' description='管理文档、检索、成员权限与 RAG 对话空间。' actions={<Button onClick={() => setOpen(true)}><Plus className='size-4' />新建知识库</Button>} />
+    {kbs.data?.length ? <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-3'>{kbs.data.map((kb) => <Link key={kb.id} to='/knowledge-bases/$knowledgeBaseId' params={{ knowledgeBaseId: kb.id }}><Card className='h-full transition hover:border-foreground/20 hover:shadow-md'><CardHeader><div className='flex items-start justify-between gap-3'><div className='flex size-10 items-center justify-center rounded-lg bg-primary/10'><Database className='size-5' /></div><Badge variant='outline'>{kb.role}</Badge></div><CardTitle className='pt-2'>{kb.name}</CardTitle><CardDescription className='line-clamp-2 min-h-10'>{kb.description || '暂无描述'}</CardDescription></CardHeader><CardContent><div className='text-xs text-muted-foreground'>更新时间 {new Date(kb.updatedAt).toLocaleString('zh-CN')}</div></CardContent></Card></Link>)}</div> : !kbs.isLoading && <EmptyState title='还没有知识库' description='创建一个知识库，然后上传 PDF、Word、Markdown 等文档开始构建 RAG。' action={<Button onClick={() => setOpen(true)}>新建知识库</Button>} />}
+    <Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle>新建知识库</DialogTitle><DialogDescription>知识库属于一个租户，并拥有独立成员权限和检索范围。</DialogDescription></DialogHeader><div className='space-y-4'><div className='space-y-2'><Label>名称</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder='例如：产品文档知识库' /></div><div className='space-y-2'><Label>描述</Label><Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder='可选' /></div><div className='space-y-2'><Label>租户</Label><Select value={tenantId || undefined} onValueChange={setTenantId}><SelectTrigger><SelectValue placeholder='使用默认个人租户' /></SelectTrigger><SelectContent>{tenants.data?.map((tenant) => <SelectItem key={tenant.id} value={tenant.id}>{tenant.name}</SelectItem>)}</SelectContent></Select></div></div><DialogFooter><Button variant='outline' onClick={() => setOpen(false)}>取消</Button><Button disabled={!name.trim() || create.isPending} onClick={() => create.mutate()}>{create.isPending ? '创建中…' : '创建'}</Button></DialogFooter></DialogContent></Dialog>
+  </div>
+}

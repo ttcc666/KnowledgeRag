@@ -1,0 +1,116 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.20.0
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-knowledge_rag}
+      POSTGRES_USER: ${POSTGRES_USER:-knowledge_rag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-knowledge_rag_dev_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-knowledge_rag} -d ${POSTGRES_DB:-knowledge_rag}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    profiles: ["s3"]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:latest
+    profiles: ["s3"]
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 ${S3_ACCESS_KEY:-minioadmin} ${S3_SECRET_KEY:-minioadmin}; do sleep 2; done;
+      mc mb --ignore-existing local/${S3_BUCKET:-knowledge-rag};
+      exit 0;
+      "
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    profiles: ["otel"]
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./observability/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "8889:8889"
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: src/KnowledgeRag.Api/Dockerfile
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      AI__BaseUrl: ${AI_BASE_URL:-https://api.openai.com/v1}
+      AI__ApiKey: ${AI_API_KEY:-}
+      AI__ChatModel: ${AI_CHAT_MODEL:-gpt-4o-mini}
+      AI__EmbeddingModel: ${AI_EMBEDDING_MODEL:-text-embedding-3-small}
+      AI__EmbeddingDimensions: ${AI_EMBEDDING_DIMENSIONS:-1536}
+      AI__SendEmbeddingDimensions: ${AI_SEND_EMBEDDING_DIMENSIONS:-false}
+      Qdrant__BaseUrl: http://qdrant:6333
+      Qdrant__Collection: ${QDRANT_COLLECTION:-knowledge_chunks}
+      SearchBackend__Vector: ${SEARCH_VECTOR_BACKEND:-qdrant}
+      SearchBackend__Lexical: ${SEARCH_LEXICAL_BACKEND:-bm25}
+      SearchBackend__PostgresTextSearchConfig: ${POSTGRES_FTS_CONFIG:-simple}
+      Database__Provider: ${DATABASE_PROVIDER:-Sqlite}
+      Database__ConnectionString: ${DATABASE_CONNECTION_STRING:-Data Source=/app/App_Data/knowledge.db}
+      Database__AutoMigrate: ${DATABASE_AUTO_MIGRATE:-true}
+      Auth__SigningKey: ${AUTH_SIGNING_KEY:-CHANGE-ME-IN-PRODUCTION-AT-LEAST-32-CHARS}
+      Auth__AllowRegistration: ${AUTH_ALLOW_REGISTRATION:-true}
+      Auth__AccessTokenLifetimeMinutes: ${AUTH_ACCESS_TOKEN_MINUTES:-60}
+      Auth__RefreshTokenLifetimeDays: ${AUTH_REFRESH_TOKEN_DAYS:-30}
+      Storage__Provider: ${STORAGE_PROVIDER:-local}
+      S3__Endpoint: ${S3_ENDPOINT:-http://minio:9000}
+      S3__Region: ${S3_REGION:-us-east-1}
+      S3__Bucket: ${S3_BUCKET:-knowledge-rag}
+      S3__AccessKey: ${S3_ACCESS_KEY:-minioadmin}
+      S3__SecretKey: ${S3_SECRET_KEY:-minioadmin}
+      S3__ForcePathStyle: ${S3_FORCE_PATH_STYLE:-true}
+      Reranker__Mode: ${RERANKER_MODE:-local}
+      Reranker__Model: ${RERANKER_MODEL:-}
+      OpenTelemetry__Enabled: ${OTEL_ENABLED:-true}
+      OpenTelemetry__ServiceName: ${OTEL_SERVICE_NAME:-KnowledgeRag.NonAzure}
+      OpenTelemetry__OtlpEndpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OpenTelemetry__ConsoleExporter: ${OTEL_CONSOLE_EXPORTER:-false}
+    ports:
+      - "8080:8080"
+    volumes:
+      - app_data:/app/App_Data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  qdrant_data:
+  postgres_data:
+  minio_data:
+  app_data:

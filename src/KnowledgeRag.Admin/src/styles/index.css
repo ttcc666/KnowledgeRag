@@ -1,0 +1,15 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import './theme.css';
+
+@custom-variant dark (&:is(.dark *));
+
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  html { @apply overflow-x-hidden; }
+  body { @apply min-h-svh w-full bg-background text-foreground antialiased; }
+  button:not(:disabled), [role='button']:not(:disabled) { cursor: pointer; }
+}
+
+@utility container { margin-inline: auto; padding-inline: 1.5rem; }
+@utility no-scrollbar { scrollbar-width: none; &::-webkit-scrollbar { display: none; } }

@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+.vs/
+.idea/
+.env
+src/KnowledgeRag.Api/App_Data/*
+!src/KnowledgeRag.Api/App_Data/files/
+src/KnowledgeRag.Api/App_Data/files/*
+
+src/KnowledgeRag.Admin/node_modules/
+src/KnowledgeRag.Admin/dist/
