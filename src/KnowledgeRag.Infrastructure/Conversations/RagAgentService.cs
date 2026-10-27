@@ -92,12 +92,11 @@ public sealed class RagAgentService(
             sessionId: null,
             cancellationToken);
 
-        RagWorkflowState? final = null;
-        await foreach (var evt in run.WatchStreamAsync(cancellationToken))
-        {
-            if (evt is WorkflowOutputEvent output && output.Data is RagWorkflowState outputState)
-                final = outputState;
-        }
+        var final = run.NewEvents
+            .OfType<WorkflowOutputEvent>()
+            .Select(x => x.Data)
+            .OfType<RagWorkflowState>()
+            .LastOrDefault();
 
         return final ?? throw new InvalidOperationException("RAG workflow 未产生最终输出。");
     }
