@@ -1,6 +1,6 @@
 import axios, { AxiosError, type AxiosRequestConfig } from 'axios'
 import { useAuthStore } from '@/stores/auth-store'
-import type { ApiKeySummary, AuthResponse, ChatMessage, ChatResponse, Conversation, CreatedApiKey, KnowledgeBaseMember, KnowledgeBaseSummary, KnowledgeDocument, SearchHit, TenantMember, TenantSummary, UserSummary } from './types'
+import type { ApiKeySummary, AuthResponse, ChatMessage, ChatResponse, Conversation, CreatedApiKey, KnowledgeBaseMember, KnowledgeBaseSummary, KnowledgeDocument, SearchHit, TenantMember, TenantSummary, UploadResponse, UserSummary } from './types'
 
 const baseURL = import.meta.env.VITE_API_BASE_URL || ''
 export const http = axios.create({ baseURL })
@@ -68,7 +68,7 @@ export const api = {
   },
   documents: {
     list: async (kbId: string) => (await http.get<KnowledgeDocument[]>(`/api/knowledge-bases/${kbId}/documents`)).data,
-    upload: async (kbId: string, file: File) => { const form = new FormData(); form.append('file', file); return (await http.post(`/api/knowledge-bases/${kbId}/documents`, form)).data },
+    upload: async (kbId: string, file: File) => { const form = new FormData(); form.append('file', file); return (await http.post<UploadResponse>(`/api/knowledge-bases/${kbId}/documents`, form)).data },
     remove: async (kbId: string, id: string) => { await http.delete(`/api/knowledge-bases/${kbId}/documents/${id}`) },
     download: async (kbId: string, id: string) => (await http.get(`/api/knowledge-bases/${kbId}/documents/${id}/file`, { responseType: 'blob' })).data as Blob,
   },

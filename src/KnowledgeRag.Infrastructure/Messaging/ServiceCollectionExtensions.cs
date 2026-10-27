@@ -1,3 +1,4 @@
+using DotNetCore.CAP;
 using KnowledgeRag.Infrastructure.Configuration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -14,7 +15,8 @@ internal static class ServiceCollectionExtensions
 
         services.AddCap(options =>
         {
-            if (database.Provider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
+            if (database.Provider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase) ||
+                database.Provider.Equals("Postgres", StringComparison.OrdinalIgnoreCase))
             {
                 options.UsePostgreSql(postgres =>
                 {
@@ -46,6 +48,7 @@ internal static class ServiceCollectionExtensions
             }
 
             options.FailedRetryCount = Math.Clamp(integration.FailedRetryCount, 1, 100);
+            options.DefaultGroupName = "knowledge-rag-document-indexer";
         });
 
         services.AddTransient<DocumentIndexingSubscriber>();

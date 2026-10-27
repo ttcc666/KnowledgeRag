@@ -1,6 +1,6 @@
 export type TenantRole = 'Member' | 'Admin' | 'Owner'
 export type KnowledgeBaseRole = 'Viewer' | 'Editor' | 'Owner'
-export type DocumentStatus = 'Processing' | 'Ready' | 'Failed'
+export type DocumentStatus = 'Queued' | 'Processing' | 'Ready' | 'Failed'
 
 export interface UserSummary { id: string; email: string; displayName: string }
 export interface AuthResponse { accessToken: string; expiresAt: string; refreshToken: string; refreshExpiresAt: string; user: UserSummary }
@@ -9,6 +9,8 @@ export interface TenantMember { id: string; email: string; displayName: string; 
 export interface KnowledgeBaseSummary { id: string; tenantId: string; name: string; description?: string | null; role: KnowledgeBaseRole; createdAt: string; updatedAt: string }
 export interface KnowledgeBaseMember { id: string; email: string; displayName: string; role: KnowledgeBaseRole; addedAt: string }
 export interface KnowledgeDocument { id: string; fileName: string; contentType: string; sizeBytes: number; chunkCount: number; sha256: string; status: DocumentStatus; lastError?: string | null; createdAt: string; updatedAt: string }
+export interface UploadResponse { documentId: string; fileName: string; chunkCount: number; sha256: string; status: DocumentStatus }
+export interface DocumentProcessingNotification { documentId: string; knowledgeBaseId: string; userId: string; fileName: string; status: DocumentStatus; progress: number; stage: string; chunkCount: number; error?: string | null; updatedAt: string }
 export interface SearchHit { pointId: string; documentId: string; fileName: string; chunkIndex: number; text: string; score: number; sourceLink: string; vectorScore?: number | null; bm25Score?: number | null; fusionScore?: number | null; rerankScore?: number | null }
 export interface Conversation { id: string; knowledgeBaseId: string; title: string; createdAt: string; updatedAt: string }
 export interface ChatSource { documentId: string; fileName: string; chunkIndex: number; sourceLink: string; score: number }

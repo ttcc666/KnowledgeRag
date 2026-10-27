@@ -7,6 +7,7 @@ public sealed record DocumentIndexRequested(Guid DocumentId, Guid KnowledgeBaseI
 public sealed record DocumentProcessingNotification(
     Guid DocumentId,
     Guid KnowledgeBaseId,
+    Guid UserId,
     string FileName,
     DocumentStatus Status,
     int Progress,

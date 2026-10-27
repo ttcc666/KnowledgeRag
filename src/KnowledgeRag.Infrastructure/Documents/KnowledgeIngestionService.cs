@@ -65,7 +65,8 @@ public sealed class KnowledgeIngestionService(
 
             try
             {
-                if (_database.Provider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
+                if (_database.Provider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase) ||
+                    _database.Provider.Equals("Postgres", StringComparison.OrdinalIgnoreCase))
                 {
                     using var transaction = db.Database.BeginTransaction(capPublisher, autoCommit: false);
                     db.Documents.Add(document);
@@ -82,21 +83,18 @@ public sealed class KnowledgeIngestionService(
             }
             catch
             {
-                if (db.Entry(document).State != EntityState.Detached)
+                db.ChangeTracker.Clear();
+                var persisted = await db.Documents.SingleOrDefaultAsync(x => x.Id == document.Id, CancellationToken.None);
+                if (persisted is not null)
                 {
-                    db.ChangeTracker.Clear();
-                    var persisted = await db.Documents.SingleOrDefaultAsync(x => x.Id == document.Id, CancellationToken.None);
-                    if (persisted is not null)
-                    {
-                        db.Documents.Remove(persisted);
-                        await db.SaveChangesAsync(CancellationToken.None);
-                    }
+                    db.Documents.Remove(persisted);
+                    await db.SaveChangesAsync(CancellationToken.None);
                 }
                 await fileStorage.DeleteAsync(knowledgeBaseId, saved.StorageKey, CancellationToken.None);
                 throw;
             }
 
-            await NotifySafeAsync(document, 0, "queued", cancellationToken);
+            await NotifySafeAsync(document, userId, 0, "queued", cancellationToken);
             return document;
         }
         finally
@@ -124,7 +122,7 @@ public sealed class KnowledgeIngestionService(
             document.LastError = null;
             document.UpdatedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(cancellationToken);
-            await NotifySafeAsync(document, 5, "processing", cancellationToken);
+            await NotifySafeAsync(document, request.UserId, 5, "processing", cancellationToken);
 
             await using var source = await fileStorage.OpenReadAsync(document.KnowledgeBaseId, document.StoredFileName, cancellationToken)
                 ?? throw new FileNotFoundException("原始文档文件不存在，无法继续索引。", document.FileName);
@@ -132,9 +130,9 @@ public sealed class KnowledgeIngestionService(
             await using (var target = File.Create(parsePath))
                 await source.CopyToAsync(target, cancellationToken);
 
-            await NotifySafeAsync(document, 15, "parsing", cancellationToken);
+            await NotifySafeAsync(document, request.UserId, 15, "parsing", cancellationToken);
             var text = await parser.ExtractTextAsync(parsePath, cancellationToken);
-            await NotifySafeAsync(document, 30, "chunking", cancellationToken);
+            await NotifySafeAsync(document, request.UserId, 30, "chunking", cancellationToken);
             var chunks = chunker.Split(text);
             if (chunks.Count == 0) throw new InvalidOperationException("没有从文件中提取到可索引文本。");
             activity?.SetTag("rag.chunk_count", chunks.Count);
@@ -175,17 +173,17 @@ public sealed class KnowledgeIngestionService(
 
                 var completed = Math.Min(offset + batch.Count, chunks.Count);
                 var progress = 40 + (int)Math.Round(45d * completed / chunks.Count);
-                await NotifySafeAsync(document, progress, "embedding", cancellationToken, chunkEntities.Count);
+                await NotifySafeAsync(document, request.UserId, progress, "embedding", cancellationToken, chunkEntities.Count);
             }
 
-            await NotifySafeAsync(document, 90, "storing", cancellationToken, chunkEntities.Count);
+            await NotifySafeAsync(document, request.UserId, 90, "storing", cancellationToken, chunkEntities.Count);
             db.DocumentChunks.AddRange(chunkEntities);
             document.ChunkCount = chunkEntities.Count;
             document.Status = DocumentStatus.Ready;
             document.LastError = null;
             document.UpdatedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(cancellationToken);
-            await NotifySafeAsync(document, 100, "completed", cancellationToken, document.ChunkCount);
+            await NotifySafeAsync(document, request.UserId, 100, "completed", cancellationToken, document.ChunkCount);
         }
         catch (Exception ex)
         {
@@ -204,7 +202,7 @@ public sealed class KnowledgeIngestionService(
             document.UpdatedAt = DateTimeOffset.UtcNow;
             try { await db.SaveChangesAsync(CancellationToken.None); }
             catch (Exception saveEx) { logger.LogError(saveEx, "Failed to persist indexing failure for document {DocumentId}", document.Id); }
-            await NotifySafeAsync(document, 100, "failed", CancellationToken.None, error: document.LastError);
+            await NotifySafeAsync(document, request.UserId, 100, "failed", CancellationToken.None, error: document.LastError);
             throw;
         }
         finally
@@ -244,13 +242,14 @@ public sealed class KnowledgeIngestionService(
         return true;
     }
 
-    private async Task NotifySafeAsync(DocumentEntity document, int progress, string stage, CancellationToken cancellationToken, int? chunkCount = null, string? error = null)
+    private async Task NotifySafeAsync(DocumentEntity document, Guid userId, int progress, string stage, CancellationToken cancellationToken, int? chunkCount = null, string? error = null)
     {
         try
         {
             await notifier.NotifyAsync(new DocumentProcessingNotification(
                 document.Id,
                 document.KnowledgeBaseId,
+                userId,
                 document.FileName,
                 document.Status,
                 Math.Clamp(progress, 0, 100),

@@ -8,6 +8,6 @@ public sealed class SignalRDocumentProcessingNotifier(IHubContext<DocumentProces
     : IDocumentProcessingNotifier
 {
     public Task NotifyAsync(DocumentProcessingNotification notification, CancellationToken cancellationToken = default)
-        => hubContext.Clients.Group(DocumentProcessingHub.GroupName(notification.KnowledgeBaseId))
+        => hubContext.Clients.Group(DocumentProcessingHub.UserGroup(notification.UserId))
             .DocumentProcessingUpdated(notification);
 }

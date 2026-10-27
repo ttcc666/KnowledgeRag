@@ -6,6 +6,7 @@ import { AxiosError } from 'axios'
 import { Toaster, toast } from 'sonner'
 import { router } from './router'
 import { useAuthStore } from './stores/auth-store'
+import { DocumentProcessingNotifications } from './components/document-processing-notifications'
 import './styles/index.css'
 
 const queryClient = new QueryClient({
@@ -15,6 +16,6 @@ const queryClient = new QueryClient({
 
 if (localStorage.getItem('theme') === 'dark') document.documentElement.classList.add('dark')
 const root = document.getElementById('root')!
-ReactDOM.createRoot(root).render(<StrictMode><QueryClientProvider client={queryClient}><RouterProvider router={router} /><Toaster richColors position='top-right' /></QueryClientProvider></StrictMode>)
+ReactDOM.createRoot(root).render(<StrictMode><QueryClientProvider client={queryClient}><DocumentProcessingNotifications /><RouterProvider router={router} /><Toaster richColors position='top-right' /></QueryClientProvider></StrictMode>)
 
 window.addEventListener('storage', (event) => { if (event.key === 'knowledge-rag-admin-session' && !event.newValue) { useAuthStore.getState().reset(); window.location.assign('/sign-in') } })
