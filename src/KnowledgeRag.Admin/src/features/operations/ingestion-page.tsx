@@ -8,15 +8,35 @@ import type { DocumentStatus, IngestionJobSummary } from '@/lib/types'
 import { Badge, Button, Card, EmptyState, Input, PageHeader, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui'
 
 export function IngestionPage() {
-  const qc = useQueryClient(); const [query, setQuery] = useState(''); const [status, setStatus] = useState('all')
+  const qc = useQueryClient()
+  const [query, setQuery] = useState('')
+  const [status, setStatus] = useState('all')
   const jobs = useQuery({ queryKey: ['ingestion-jobs'], queryFn: api.ingestion.jobs, refetchInterval: 8_000 })
-  const action = useMutation({ mutationFn: async ({ job, op }: { job: IngestionJobSummary; op: 'retry' | 'reindex' | 'cancel' }) => { if (op === 'retry') await api.documents.retry(job.knowledgeBaseId, job.documentId); if (op === 'reindex') await api.documents.reindex(job.knowledgeBaseId, job.documentId); if (op === 'cancel') await api.documents.cancel(job.knowledgeBaseId, job.documentId) }, onSuccess: async () => { toast.success('任务操作已提交'); await Promise.all([qc.invalidateQueries({ queryKey: ['ingestion-jobs'] }), qc.invalidateQueries({ queryKey: ['dashboard'] })]) }, onError: (e) => toast.error(getErrorMessage(e)) })
-  const rows = useMemo(() => (jobs.data || []).filter((x) => (status === 'all' || x.status === status) && `${x.fileName} ${x.knowledgeBaseName}`.toLowerCase().includes(query.toLowerCase())), [jobs.data, query, status])
-  const counts = (jobs.data || []).reduce<Record<string, number>>((a, x) => { a[x.status] = (a[x.status] || 0) + 1; return a }, {})
-  return <div className='space-y-6'><PageHeader eyebrow='Operate' title='Ingestion Operations' description='管理 CAP 文档摄取任务：查看耗时、失败原因，并执行重试、重新索引或取消。' actions={<Button variant='outline' onClick={() => jobs.refetch()}><RefreshCw className='size-4' />刷新</Button>} />
-    <div className='grid gap-3 sm:grid-cols-4'>{(['Processing','Failed','Ready','Cancelled'] as DocumentStatus[]).map((s) => <Card key={s} className='p-4'><div className='text-xs text-muted-foreground'>{s}</div><div className='mt-1 text-2xl font-semibold'>{counts[s] || 0}</div></Card>)}</div>
-    <div className='flex flex-col gap-3 sm:flex-row'><div className='relative flex-1'><Search className='absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground' /><Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder='搜索文件或知识库…' className='pl-9' /></div><Select value={status} onValueChange={setStatus}><SelectTrigger className='sm:w-44'><SelectValue /></SelectTrigger><SelectContent><SelectItem value='all'>全部状态</SelectItem>{['Queued','Processing','Ready','Failed','Cancelled'].map((x) => <SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent></Select></div>
-    {rows.length ? <div className='space-y-2'>{rows.map((job) => <Card key={job.documentId} className='flex flex-col gap-4 p-4 lg:flex-row lg:items-center'><div className='flex min-w-0 flex-1 gap-3'><div className='flex size-10 shrink-0 items-center justify-center rounded-xl border bg-background'><FileText className='size-4 text-primary' /></div><div className='min-w-0'><Link to='/knowledge-bases/$knowledgeBaseId' params={{ knowledgeBaseId: job.knowledgeBaseId }} className='truncate text-sm font-semibold hover:underline'>{job.fileName}</Link><div className='mt-1 text-xs text-muted-foreground'>{job.knowledgeBaseName} · {job.chunkCount} chunks · {formatDuration(job.elapsedSeconds)}</div>{job.lastError && <div className='mt-2 line-clamp-2 text-xs text-destructive'>{job.lastError}</div>}</div></div><div className='flex flex-wrap items-center gap-2'><Badge variant={job.status === 'Ready' ? 'success' : job.status === 'Failed' ? 'destructive' : 'outline'}>{job.status}</Badge>{(job.status === 'Queued' || job.status === 'Processing') && <Button size='sm' variant='outline' onClick={() => action.mutate({ job, op:'cancel' })}><Ban className='size-3.5' />取消</Button>}{(job.status === 'Failed' || job.status === 'Cancelled') && <Button size='sm' onClick={() => action.mutate({ job, op:'retry' })}><RotateCcw className='size-3.5' />重试</Button>}{job.status === 'Ready' && <Button size='sm' variant='outline' onClick={() => action.mutate({ job, op:'reindex' })}><RefreshCw className='size-3.5' />重新索引</Button>}</div></Card>)}</div> : !jobs.isLoading && <EmptyState title='没有匹配的摄取任务' description='上传文档后，CAP 后台处理任务会在这里出现。' />}
+  const action = useMutation({
+    mutationFn: async ({ job, op }: { job: IngestionJobSummary; op: 'retry' | 'reindex' | 'cancel' }) => {
+      if (op === 'retry') await api.documents.retry(job.knowledgeBaseId, job.documentId)
+      if (op === 'reindex') await api.documents.reindex(job.knowledgeBaseId, job.documentId)
+      if (op === 'cancel') await api.documents.cancel(job.knowledgeBaseId, job.documentId)
+    },
+    onSuccess: async () => {
+      toast.success('任务操作已提交')
+      await Promise.all([qc.invalidateQueries({ queryKey: ['ingestion-jobs'] }), qc.invalidateQueries({ queryKey: ['dashboard'] })])
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
+  })
+  const rows = useMemo(() => (jobs.data || []).filter((item) => (status === 'all' || item.status === status) && `${item.fileName} ${item.knowledgeBaseName}`.toLowerCase().includes(query.toLowerCase())), [jobs.data, query, status])
+  const counts = (jobs.data || []).reduce<Record<string, number>>((result, item) => { result[item.status] = (result[item.status] || 0) + 1; return result }, {})
+
+  return <div className='space-y-6'>
+    <PageHeader eyebrow='Operate' title='Ingestion Operations' description='管理 CAP 文档摄取任务：查看队列位置、耗时和失败原因，并执行重试、重新索引或取消。' actions={<Button variant='outline' onClick={() => jobs.refetch()}><RefreshCw className='size-4' />刷新</Button>} />
+    <div className='grid gap-3 sm:grid-cols-4'>{(['Processing', 'Failed', 'Ready', 'Cancelled'] as DocumentStatus[]).map((itemStatus) => <Card key={itemStatus} className='p-4'><div className='text-xs text-muted-foreground'>{itemStatus}</div><div className='mt-1 text-2xl font-semibold'>{counts[itemStatus] || 0}</div></Card>)}</div>
+    <div className='flex flex-col gap-3 sm:flex-row'><div className='relative flex-1'><Search className='absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground' /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder='搜索文件或知识库…' className='pl-9' /></div><Select value={status} onValueChange={setStatus}><SelectTrigger className='sm:w-44'><SelectValue /></SelectTrigger><SelectContent><SelectItem value='all'>全部状态</SelectItem>{['Queued', 'Processing', 'Ready', 'Failed', 'Cancelled'].map((itemStatus) => <SelectItem key={itemStatus} value={itemStatus}>{itemStatus}</SelectItem>)}</SelectContent></Select></div>
+    {rows.length ? <div className='space-y-2'>{rows.map((job) => <Card key={job.documentId} className='flex flex-col gap-4 p-4 lg:flex-row lg:items-center'><div className='flex min-w-0 flex-1 gap-3'><div className='flex size-10 shrink-0 items-center justify-center rounded-xl border bg-background'><FileText className='size-4 text-primary' /></div><div className='min-w-0'><Link to='/knowledge-bases/$knowledgeBaseId' params={{ knowledgeBaseId: job.knowledgeBaseId }} className='truncate text-sm font-semibold hover:underline'>{job.fileName}</Link><div className='mt-1 text-xs text-muted-foreground'>{job.knowledgeBaseName} · {job.chunkCount} chunks · {formatDuration(job.elapsedSeconds)}{job.queuePosition ? ` · queue #${job.queuePosition}` : ''}</div>{job.lastError && <div className='mt-2 rounded-lg bg-destructive/8 px-2.5 py-1.5 text-xs text-destructive'><span className='font-medium'>Last failure:</span> {job.lastError}</div>}</div></div><div className='flex flex-wrap items-center gap-2'><Badge variant={job.status === 'Ready' ? 'success' : job.status === 'Failed' ? 'destructive' : 'outline'}>{job.status}{job.queuePosition ? ` #${job.queuePosition}` : ''}</Badge>{(job.status === 'Queued' || job.status === 'Processing') && <Button size='sm' variant='outline' onClick={() => action.mutate({ job, op: 'cancel' })}><Ban className='size-3.5' />取消</Button>}{(job.status === 'Failed' || job.status === 'Cancelled') && <Button size='sm' onClick={() => action.mutate({ job, op: 'retry' })}><RotateCcw className='size-3.5' />重试</Button>}{job.status === 'Ready' && <Button size='sm' variant='outline' onClick={() => action.mutate({ job, op: 'reindex' })}><RefreshCw className='size-3.5' />重新索引</Button>}</div></Card>)}</div> : !jobs.isLoading && <EmptyState title='没有匹配的摄取任务' description='上传文档后，CAP 后台处理任务会在这里出现。' />}
   </div>
 }
-function formatDuration(seconds: number) { if (seconds < 60) return `${Math.round(seconds)}s`; if (seconds < 3600) return `${Math.round(seconds/60)}m`; return `${(seconds/3600).toFixed(1)}h` }
+
+function formatDuration(seconds: number) {
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`
+  return `${(seconds / 3600).toFixed(1)}h`
+}
