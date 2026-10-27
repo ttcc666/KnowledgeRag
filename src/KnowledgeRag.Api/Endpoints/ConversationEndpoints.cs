@@ -1,11 +1,14 @@
 using System.Security.Claims;
 using System.Text.Json;
 using KnowledgeRag.Api.Security;
+using KnowledgeRag.Application.Contracts;
 
 namespace KnowledgeRag.Api.Endpoints;
 
 public static class ConversationEndpoints
 {
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
+
     public static IEndpointRouteBuilder MapConversationEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/conversations").RequireAuthorization().WithTags("Conversations");
@@ -25,7 +28,7 @@ public static class ConversationEndpoints
         group.MapGet("/{conversationId:guid}/messages", async (Guid conversationId, ClaimsPrincipal principal, ConversationService service, CancellationToken ct) =>
         {
             var messages = await service.GetMessagesAsync(HttpActorContext.From(principal), conversationId, ct);
-            return Results.Ok(messages.Select(x => new { x.Id, x.Role, x.Content, x.SourcesJson, x.CreatedAt }));
+            return Results.Ok(messages.Select(x => new { x.Id, x.Role, x.Content, SourcesJson = NormalizeSourcesJson(x.SourcesJson), x.CreatedAt }));
         });
 
         group.MapPost("/{conversationId:guid}/messages", async (Guid conversationId, SendMessageRequest request, ClaimsPrincipal principal, ConversationService service, CancellationToken ct) =>
@@ -62,5 +65,19 @@ public static class ConversationEndpoints
         }).RequireAuthorization().WithTags("Conversations");
 
         return app;
+    }
+
+    private static string? NormalizeSourcesJson(string? sourcesJson)
+    {
+        if (string.IsNullOrWhiteSpace(sourcesJson)) return sourcesJson;
+        try
+        {
+            var sources = JsonSerializer.Deserialize<List<ChatSource>>(sourcesJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            return sources is null ? sourcesJson : JsonSerializer.Serialize(sources, WebJson);
+        }
+        catch (JsonException)
+        {
+            return sourcesJson;
+        }
     }
 }

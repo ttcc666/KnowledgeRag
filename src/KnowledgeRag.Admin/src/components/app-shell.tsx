@@ -85,6 +85,7 @@ export function AppShell() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
+  const isChat = pathname === '/chat'
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark)
@@ -248,9 +249,9 @@ export function AppShell() {
           </div>
         </header>
 
-        <main className='mx-auto w-full max-w-[1580px] p-4 sm:p-6 lg:p-8'>
+        <main className={cn(isChat ? 'h-[calc(100svh-4rem)] overflow-hidden p-3 sm:p-4' : 'mx-auto w-full max-w-[1580px] p-4 sm:p-6 lg:p-8')}>
           <AnimatePresence mode='wait' initial={false}>
-            <motion.div key={pathname} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -3 }} transition={{ duration: 0.18 }}>
+            <motion.div key={pathname} className={isChat ? 'chat-route h-full min-h-0' : undefined} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -3 }} transition={{ duration: 0.18 }}>
               <Outlet />
             </motion.div>
           </AnimatePresence>
