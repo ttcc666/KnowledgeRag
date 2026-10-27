@@ -1,7 +1,7 @@
 FROM node:22-alpine AS frontend
 WORKDIR /frontend
-COPY src/KnowledgeRag.Admin/package.json ./
-RUN npm install --no-audit --no-fund
+COPY src/KnowledgeRag.Admin/package.json src/KnowledgeRag.Admin/package-lock.json ./
+RUN npm ci --no-audit --no-fund
 COPY src/KnowledgeRag.Admin/ ./
 RUN npm run build
 
