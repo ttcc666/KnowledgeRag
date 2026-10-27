@@ -16,8 +16,10 @@ jobs:
       - name: Reassemble and unpack project source
         shell: bash
         run: |
-          cat bootstrap/chunk-* > /tmp/project.tar.gz.b64
+          cat bootstrap/part-* > /tmp/project.tar.gz.b64
+          test "$(wc -c < /tmp/project.tar.gz.b64)" = "108488"
           base64 -d /tmp/project.tar.gz.b64 > /tmp/project.tar.gz
+          echo "11925cf1beb81bfee1b8e9a5f30a1def8864cbc33b5ce047aaa17b0025c794fa  /tmp/project.tar.gz" | sha256sum -c -
           tar -tzf /tmp/project.tar.gz >/dev/null
           tar -xzf /tmp/project.tar.gz -C .
           rm -rf bootstrap
