@@ -11,6 +11,7 @@ namespace KnowledgeRag.Infrastructure.Conversations;
 public sealed class ConversationService(AppDbContext db, KnowledgeBaseAccessService access, RagAgentService agent)
 {
     private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> Locks = new();
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
 
     public async Task<ConversationEntity> CreateAsync(ActorContext actor, CreateConversationRequest request, CancellationToken cancellationToken = default)
     {
@@ -72,7 +73,7 @@ public sealed class ConversationService(AppDbContext db, KnowledgeBaseAccessServ
             var sources = result.Sources.Select(ToSource).ToList();
             db.ChatMessages.AddRange(
                 new ChatMessageEntity { Id = Guid.NewGuid(), ConversationId = conversation.Id, Role = "user", Content = message, CreatedAt = now },
-                new ChatMessageEntity { Id = Guid.NewGuid(), ConversationId = conversation.Id, Role = "assistant", Content = result.Answer, SourcesJson = JsonSerializer.Serialize(sources), CreatedAt = now.AddTicks(1) });
+                new ChatMessageEntity { Id = Guid.NewGuid(), ConversationId = conversation.Id, Role = "assistant", Content = result.Answer, SourcesJson = JsonSerializer.Serialize(sources, WebJson), CreatedAt = now.AddTicks(1) });
             await db.SaveChangesAsync(cancellationToken);
             return new ChatResponse(conversation.Id, result.Answer, sources);
         }
