@@ -2,6 +2,7 @@ using DotNetCore.CAP;
 using KnowledgeRag.Infrastructure.Configuration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Savorboard.CAP.InMemoryMessageQueue;
 
 namespace KnowledgeRag.Infrastructure.Messaging;
 
