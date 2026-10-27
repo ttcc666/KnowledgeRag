@@ -109,10 +109,12 @@ public sealed class KnowledgeIngestionService(
     }
 
     public async Task<IReadOnlyList<DocumentEntity>> ListAsync(Guid knowledgeBaseId, CancellationToken cancellationToken = default)
-        => await db.Documents.AsNoTracking()
+    {
+        var rows = await db.Documents.AsNoTracking()
             .Where(x => x.KnowledgeBaseId == knowledgeBaseId)
-            .OrderByDescending(x => x.CreatedAt)
             .ToListAsync(cancellationToken);
+        return rows.OrderByDescending(x => x.CreatedAt).ToList();
+    }
 
     public async Task<DocumentDownload?> OpenReadAsync(Guid knowledgeBaseId, Guid documentId, CancellationToken cancellationToken = default)
     {
