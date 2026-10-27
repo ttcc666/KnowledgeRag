@@ -111,7 +111,18 @@ Because the API already exports the shared ActivitySource, these spans flow thro
 
 The benchmark is `evaluation/rag-benchmark.jsonl`. It deliberately covers fact lookup, comparison, multi-hop retrieval, summary, no-answer behavior, conflicting sources, prompt injection, follow-up context, extraction, and citation accuracy.
 
-CI runs deterministic policy tests plus an Agent Framework `LocalEvaluator` smoke check without network calls. For model-backed evaluation, use Microsoft Agent Framework / `Microsoft.Extensions.AI.Evaluation` with at least:
+CI runs deterministic policy tests plus an Agent Framework `LocalEvaluator` smoke check without network calls. The live benchmark runner uses the real conversation API and saves answers, source evidence, deterministic checks, and latency for later quality judging.
+
+```bash
+export RAG_BASE_URL=http://localhost:5000
+export RAG_TOKEN='<access-token>'
+export RAG_KB_ID='<indexed-knowledge-base-guid>'
+python3 evaluation/run_benchmark.py
+```
+
+The runner writes `evaluation/results.jsonl` by default. It returns a non-zero exit code if any deterministic safety/grounding/no-answer check fails. `follow-up` cases can include a `setup` prompt and are executed in the same conversation to exercise persisted Agent session context.
+
+For model-backed evaluation, feed the saved results to Microsoft Agent Framework / `Microsoft.Extensions.AI.Evaluation` and use at least:
 
 - RelevanceEvaluator
 - GroundednessEvaluator
