@@ -49,9 +49,17 @@ test('failed ingestion can be retried from operations', async ({ page }) => {
   await request
 })
 
-test('chat panes scroll independently without clipping controls', async ({ page }) => {
+test('chat defaults to a chat-first workspace with on-demand sources', async ({ page }) => {
   await page.goto('/chat')
+  const isDesktop = await page.evaluate(() => window.innerWidth >= 1024)
   const composer = page.getByPlaceholder('询问当前知识库…')
+
+  await expect(composer).toBeInViewport()
+  if (isDesktop) {
+    await expect(page.getByTestId('conversation-panel')).toBeVisible()
+    await expect(page.getByTestId('source-panel')).toHaveCount(0)
+  }
+
   await composer.fill('What is the policy?')
   await composer.press('Enter')
   await expect(page.getByText('The policy answer.').last()).toBeVisible()
@@ -63,23 +71,22 @@ test('chat panes scroll independently without clipping controls', async ({ page 
   await page.getByRole('button', { name: /handbook\.pdf/ }).click()
   await expect(page.getByText('Employees receive the documented benefit.', { exact: false }).last()).toBeVisible()
 
-  const isDesktop = await page.evaluate(() => window.innerWidth >= 1024)
   const activeSource = isDesktop
-    ? page.locator('aside.border-l')
+    ? page.getByTestId('source-panel')
     : page.locator('div.fixed.inset-0.z-50.lg\\:hidden').filter({ hasText: '来源证据' })
   const openDocument = activeSource.getByRole('button', { name: '打开原始文档' })
-
-  if (isDesktop) {
-    const sourcePane = activeSource.locator(':scope > :last-child')
-    const sourceCanScroll = await sourcePane.evaluate((element) => element.scrollHeight > element.clientHeight + 2)
-    expect(sourceCanScroll).toBeTruthy()
-    await sourcePane.evaluate((element) => { element.scrollTop = element.scrollHeight })
-  } else {
-    await openDocument.scrollIntoViewIfNeeded()
-  }
-
+  await openDocument.scrollIntoViewIfNeeded()
   await expect(openDocument).toBeInViewport()
+
   const sourceRequest = page.waitForRequest((request) => request.url().endsWith('/api/knowledge-bases/kb1/documents/d1/file'))
   await openDocument.click()
   await sourceRequest
+
+  if (isDesktop) {
+    await page.getByRole('button', { name: '进入专注模式' }).click()
+    await expect(page.getByTestId('conversation-panel')).toHaveCount(0)
+    await expect(page.getByTestId('source-panel')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: '退出专注模式' })).toBeVisible()
+    await expect(composer).toBeInViewport()
+  }
 })

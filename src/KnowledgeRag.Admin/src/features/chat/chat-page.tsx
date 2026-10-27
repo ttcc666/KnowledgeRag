@@ -1,6 +1,25 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bot, ChevronRight, Copy, FileText, Menu, MessageSquarePlus, PanelRightClose, PanelRightOpen, RotateCcw, Send, Square, Trash2, User, X } from 'lucide-react'
+import {
+  Bot,
+  ChevronRight,
+  Copy,
+  FileText,
+  Maximize2,
+  Menu,
+  MessageSquarePlus,
+  Minimize2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  RotateCcw,
+  Send,
+  Square,
+  Trash2,
+  User,
+  X,
+} from 'lucide-react'
 import { motion } from 'motion/react'
 import { toast } from 'sonner'
 import { api, getErrorMessage } from '@/lib/api'
@@ -22,6 +41,10 @@ function formatScore(value?: number | null) {
   return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(4) : '—'
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
+}
+
 export function ChatPage() {
   const qc = useQueryClient()
   const kbs = useQuery({ queryKey: ['knowledge-bases'], queryFn: api.knowledgeBases.list })
@@ -38,9 +61,12 @@ export function ChatPage() {
 
   const messages = useQuery({ queryKey: ['messages', conversationId], queryFn: () => api.conversations.messages(conversationId), enabled: !!conversationId })
   const [text, setText] = useState('')
-  const endRef = useRef<HTMLDivElement>(null)
+  const messageViewportRef = useRef<HTMLDivElement>(null)
   const [selectedSource, setSelectedSource] = useState<ChatSource | null>(null)
-  const [sourcePanel, setSourcePanel] = useState(true)
+  const [sourcePanel, setSourcePanel] = useState(false)
+  const [conversationsOpen, setConversationsOpen] = useState(() => localStorage.getItem('chat-conversations-open') !== 'false')
+  const [focusMode, setFocusMode] = useState(false)
+  const [sourceWidth, setSourceWidth] = useState(() => clamp(Number(localStorage.getItem('chat-source-width')) || 380, 320, 520))
   const [mobileConversations, setMobileConversations] = useState(false)
   const [mobileSource, setMobileSource] = useState(false)
   const [liveUser, setLiveUser] = useState('')
@@ -48,7 +74,19 @@ export function ChatPage() {
   const [streaming, setStreaming] = useState(false)
   const controllerRef = useRef<AbortController | null>(null)
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages.data, liveAnswer])
+  useEffect(() => {
+    localStorage.setItem('chat-conversations-open', String(conversationsOpen))
+  }, [conversationsOpen])
+
+  useEffect(() => {
+    localStorage.setItem('chat-source-width', String(sourceWidth))
+  }, [sourceWidth])
+
+  useEffect(() => {
+    const viewport = messageViewportRef.current
+    if (!viewport) return
+    viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' })
+  }, [messages.data, liveAnswer])
 
   const create = useMutation({
     mutationFn: () => api.conversations.create(activeKb),
@@ -63,6 +101,7 @@ export function ChatPage() {
     onSuccess: async () => {
       setConversationId('')
       setSelectedSource(null)
+      setSourcePanel(false)
       await qc.invalidateQueries({ queryKey: ['conversations', activeKb] })
     },
     onError: (error) => toast.error(getErrorMessage(error)),
@@ -110,61 +149,119 @@ export function ChatPage() {
     return <div className='space-y-6'><PageHeader eyebrow='RAG assistant' title='RAG 对话' description='先创建知识库并上传文档，再开始有来源依据的问答。' /><EmptyState icon={<Bot className='size-5 text-primary' />} title='没有可用知识库' description='创建知识库并完成向量化后，就可以开始对话。' /></div>
   }
 
-  const conversationList = <ConversationList conversations={conversations.data || []} current={conversationId} onNew={() => create.mutate()} onSelect={(id) => { setConversationId(id); setSelectedSource(null); setMobileConversations(false) }} />
+  const conversationList = <ConversationList conversations={conversations.data || []} current={conversationId} onNew={() => create.mutate()} onSelect={(id) => {
+    setConversationId(id)
+    setSelectedSource(null)
+    setSourcePanel(false)
+    setMobileConversations(false)
+  }} />
+
   const onSource = (source: ChatSource) => {
     setSelectedSource(source)
-    setSourcePanel(true)
     if (window.innerWidth < 1024) setMobileSource(true)
+    else setSourcePanel(true)
   }
 
-  return <div className='space-y-5'>
-    <PageHeader eyebrow='RAG assistant' title='与知识对话' description='Agent Framework streaming、Hybrid Search 与可审计来源在一个工作区完成。' actions={<div className='w-full sm:w-64'><Select value={activeKb} onValueChange={setKbId}><SelectTrigger><SelectValue placeholder='选择知识库' /></SelectTrigger><SelectContent>{kbs.data?.map((kb) => <SelectItem value={kb.id} key={kb.id}>{kb.name}</SelectItem>)}</SelectContent></Select></div>} />
-    <div className={cn('grid min-h-[calc(100svh-205px)] overflow-hidden rounded-2xl border bg-card/70 shadow-sm', sourcePanel ? 'lg:grid-cols-[248px_minmax(0,1fr)_360px]' : 'lg:grid-cols-[248px_minmax(0,1fr)]')}>
-      <aside className='hidden border-r bg-muted/15 lg:block'>{conversationList}</aside>
-      <section className='flex min-w-0 flex-col bg-background/45'>
-        <div className='flex h-14 shrink-0 items-center justify-between border-b bg-background/80 px-3 backdrop-blur sm:px-4'>
-          <div className='flex min-w-0 items-center gap-2'>
-            <Button size='icon-sm' variant='ghost' className='lg:hidden' onClick={() => setMobileConversations(true)}><Menu className='size-4' /></Button>
-            <div className='min-w-0'><div className='truncate text-sm font-semibold'>{selectedConversation?.title || '新会话'}</div><div className='truncate text-[10px] text-muted-foreground'>{streaming ? '● 正在生成回答' : 'Hybrid Search → RRF → Reranker → Agent'}</div></div>
-          </div>
-          <div className='flex items-center gap-1'>
-            {conversationId && <Button size='icon-sm' variant='ghost' aria-label='删除当前会话' onClick={() => { if (confirm('删除当前会话？')) remove.mutate(conversationId) }}><Trash2 className='size-3.5 text-destructive' /></Button>}
-            <Button size='icon-sm' variant='ghost' aria-label={sourcePanel ? '收起来源面板' : '展开来源面板'} onClick={() => setSourcePanel(!sourcePanel)} className='hidden lg:inline-flex'>{sourcePanel ? <PanelRightClose className='size-4' /> : <PanelRightOpen className='size-4' />}</Button>
-            {selectedSource && <Button size='icon-sm' variant='ghost' aria-label='查看来源证据' className='lg:hidden' onClick={() => setMobileSource(true)}><FileText className='size-4' /></Button>}
-          </div>
-        </div>
+  const showConversations = conversationsOpen && !focusMode
+  const showSource = sourcePanel && !focusMode
 
-        <div className='flex-1 overflow-y-auto bg-gradient-to-b from-muted/12 via-transparent to-transparent px-4 py-6 sm:px-6 lg:px-8'>
-          <div className='mx-auto w-full max-w-5xl space-y-7'>
+  const beginSourceResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = sourceWidth
+    const onMove = (moveEvent: PointerEvent) => setSourceWidth(clamp(startWidth + startX - moveEvent.clientX, 320, 520))
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
+  return <div className='flex h-full min-h-0 flex-col gap-2'>
+    <div className='flex min-h-12 shrink-0 items-center gap-2 rounded-2xl border bg-background/78 px-2.5 py-2 shadow-sm backdrop-blur-xl sm:px-3'>
+      <div className='flex min-w-0 flex-1 items-center gap-1.5'>
+        <Button size='icon-sm' variant='ghost' className='lg:hidden' aria-label='打开会话列表' onClick={() => setMobileConversations(true)}><Menu className='size-4' /></Button>
+        <Button size='icon-sm' variant='ghost' className='hidden lg:inline-flex' aria-label={showConversations ? '隐藏会话列表' : '显示会话列表'} onClick={() => setConversationsOpen((current) => !current)}>
+          {showConversations ? <PanelLeftClose className='size-4' /> : <PanelLeftOpen className='size-4' />}
+        </Button>
+        <div className='min-w-0'>
+          <div className='flex items-center gap-2'>
+            <span className='truncate text-sm font-semibold'>与知识对话</span>
+            {focusMode && <span className='hidden rounded-full border bg-primary/5 px-2 py-0.5 text-[9px] font-medium text-primary sm:inline'>Focus</span>}
+            {streaming && <span className='hidden text-[10px] text-primary sm:inline'>● 正在生成</span>}
+          </div>
+          <div className='hidden max-w-[38rem] truncate text-[10px] text-muted-foreground sm:block'>{selectedConversation?.title || '新会话'} · Hybrid Search → RRF → Reranker → Agent</div>
+        </div>
+      </div>
+
+      <div className='flex shrink-0 items-center gap-1'>
+        <div className='w-32 sm:w-44 lg:w-52'><Select value={activeKb} onValueChange={setKbId}><SelectTrigger className='h-8'><SelectValue placeholder='选择知识库' /></SelectTrigger><SelectContent>{kbs.data?.map((kb) => <SelectItem value={kb.id} key={kb.id}>{kb.name}</SelectItem>)}</SelectContent></Select></div>
+        {conversationId && <Button size='icon-sm' variant='ghost' aria-label='删除当前会话' onClick={() => { if (confirm('删除当前会话？')) remove.mutate(conversationId) }}><Trash2 className='size-3.5 text-destructive' /></Button>}
+        <Button size='icon-sm' variant={showSource ? 'secondary' : 'ghost'} className='hidden lg:inline-flex' aria-label={showSource ? '关闭来源证据' : '打开来源证据'} onClick={() => setSourcePanel((current) => !current)}>
+          {showSource ? <PanelRightClose className='size-4' /> : <PanelRightOpen className='size-4' />}
+        </Button>
+        {selectedSource && <Button size='icon-sm' variant='ghost' aria-label='查看来源证据' className='lg:hidden' onClick={() => setMobileSource(true)}><FileText className='size-4' /></Button>}
+        <Button size='icon-sm' variant={focusMode ? 'secondary' : 'ghost'} aria-label={focusMode ? '退出专注模式' : '进入专注模式'} onClick={() => setFocusMode((current) => !current)}>
+          {focusMode ? <Minimize2 className='size-4' /> : <Maximize2 className='size-4' />}
+        </Button>
+      </div>
+    </div>
+
+    <div
+      className='chat-workspace grid min-h-0 flex-1 overflow-hidden rounded-2xl border bg-card/70 shadow-sm'
+      data-conversations={showConversations ? 'true' : 'false'}
+      data-source={showSource ? 'true' : 'false'}
+      data-focus={focusMode ? 'true' : 'false'}
+      style={{ '--source-width': `${sourceWidth}px` } as CSSProperties}
+    >
+      {showConversations && <aside data-testid='conversation-panel' className='hidden border-r bg-muted/12 lg:block'>{conversationList}</aside>}
+
+      <section className='flex min-w-0 flex-col bg-background/45'>
+        <div ref={messageViewportRef} data-testid='message-viewport' className='min-h-0 flex-1 overflow-y-auto overscroll-contain bg-gradient-to-b from-muted/10 via-transparent to-transparent px-4 py-5 sm:px-6 lg:px-8'>
+          <div className='mx-auto w-full max-w-6xl space-y-6'>
             {messages.data?.map((message, index) => <Message key={message.id} message={message} index={index} onSource={onSource} />)}
             {liveUser && <Message message={{ id: 'live-user', role: 'user', content: liveUser, createdAt: new Date().toISOString() }} index={999} onSource={() => {}} />}
             {streaming && <LiveAssistant text={liveAnswer} />}
-            {!messages.isLoading && !messages.data?.length && !streaming && <div className='grid min-h-[430px] place-items-center'><div className='max-w-lg text-center'><div className='mx-auto mb-5 flex size-14 items-center justify-center rounded-2xl border bg-primary/8 text-primary shadow-sm'><Bot className='size-6' /></div><div className='text-lg font-semibold'>从知识库开始探索</div><div className='mt-2 text-sm leading-6 text-muted-foreground'>回答会实时生成，并保留原文摘录、页码与检索分数。点击回答下方的引用即可审计证据。</div><div className='mt-5 flex flex-wrap justify-center gap-2'>{['总结这个知识库', '有哪些关键主题？', '帮我找相关文档'].map((item) => <button key={item} onClick={() => setText(item)} className='rounded-full border bg-background px-3.5 py-2 text-xs text-muted-foreground shadow-sm transition hover:border-primary/30 hover:text-foreground'>{item}</button>)}</div></div></div>}
-            <div ref={endRef} />
+            {!messages.isLoading && !messages.data?.length && !streaming && <div className='grid min-h-[360px] place-items-center'><div className='max-w-lg text-center'><div className='mx-auto mb-4 flex size-12 items-center justify-center rounded-2xl border bg-primary/8 text-primary shadow-sm'><Bot className='size-5' /></div><div className='text-base font-semibold'>从知识库开始探索</div><div className='mt-2 text-sm leading-6 text-muted-foreground'>回答会实时生成，并保留原文摘录、页码与检索分数。点击回答下方的引用即可按需打开证据。</div><div className='mt-4 flex flex-wrap justify-center gap-2'>{['总结这个知识库', '有哪些关键主题？', '帮我找相关文档'].map((item) => <button key={item} onClick={() => setText(item)} className='rounded-full border bg-background px-3.5 py-1.5 text-xs text-muted-foreground shadow-sm transition hover:border-primary/30 hover:text-foreground'>{item}</button>)}</div></div></div>}
           </div>
         </div>
 
-        <div className='shrink-0 border-t bg-background/82 p-3 backdrop-blur sm:p-4'>
-          <div className='mx-auto max-w-4xl rounded-2xl border bg-background p-2 shadow-sm transition focus-within:border-primary/35 focus-within:shadow-md'>
-            <Textarea className='min-h-20 resize-none border-0 bg-transparent px-3 py-2 shadow-none focus-visible:ring-0' value={text} onChange={(event) => setText(event.target.value)} placeholder='询问当前知识库…' disabled={streaming} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void runStream(text) } }} />
-            <div className='flex items-center justify-between gap-3 px-1 pb-1'><div className='flex min-w-0 items-center gap-2'><span className='hidden text-[10px] text-muted-foreground sm:inline'>Enter 发送 · Shift+Enter 换行</span>{conversationId && !streaming && <Button size='sm' variant='ghost' onClick={regenerate}><RotateCcw className='size-3' />重新生成</Button>}</div>{streaming ? <Button size='sm' variant='destructive' onClick={() => controllerRef.current?.abort()}><Square className='size-3.5' />停止</Button> : <Button size='icon' aria-label='发送消息' className='size-9 rounded-xl' disabled={!activeKb || !text.trim()} onClick={() => void runStream(text)}><Send className='size-4' /></Button>}</div>
+        <div className='shrink-0 border-t bg-background/86 p-2.5 backdrop-blur sm:p-3'>
+          <div className='mx-auto max-w-4xl rounded-2xl border bg-background p-1.5 shadow-sm transition focus-within:border-primary/35 focus-within:shadow-md'>
+            <Textarea className='min-h-12 max-h-36 resize-none border-0 bg-transparent px-3 py-2 shadow-none focus-visible:ring-0' value={text} onChange={(event) => setText(event.target.value)} placeholder='询问当前知识库…' disabled={streaming} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void runStream(text) } }} />
+            <div className='flex items-center justify-between gap-3 px-1 pb-1'>
+              <div className='flex min-w-0 items-center gap-1.5'><span className='hidden text-[10px] text-muted-foreground sm:inline'>Enter 发送 · Shift+Enter 换行</span>{conversationId && !streaming && <Button size='sm' variant='ghost' className='h-7 px-2 text-xs' onClick={regenerate}><RotateCcw className='size-3' />重新生成</Button>}</div>
+              {streaming ? <Button size='sm' variant='destructive' className='h-8' onClick={() => controllerRef.current?.abort()}><Square className='size-3.5' />停止</Button> : <Button size='icon' aria-label='发送消息' className='size-8 rounded-xl' disabled={!activeKb || !text.trim()} onClick={() => void runStream(text)}><Send className='size-3.5' /></Button>}
+            </div>
           </div>
         </div>
       </section>
 
-      {sourcePanel && <aside className='hidden border-l bg-muted/8 lg:block'><div className='flex h-14 items-center justify-between border-b bg-background/70 px-4'><div><div className='text-xs font-semibold'>来源证据</div><div className='text-[10px] text-muted-foreground'>Source evidence</div></div>{selectedSource && <FileText className='size-4 text-muted-foreground' />}</div>{selectedSource ? <SourcePanel source={selectedSource} kbId={activeKb} /> : <SourceEmpty />}</aside>}
+      {showSource && <aside data-testid='source-panel' className='source-panel relative hidden border-l bg-muted/8 lg:flex'>
+        <div role='separator' aria-label='调整来源面板宽度' className='absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none hover:bg-primary/10' onPointerDown={beginSourceResize} />
+        <div className='flex h-12 shrink-0 items-center justify-between border-b bg-background/70 px-4'>
+          <div><div className='text-xs font-semibold'>来源证据</div><div className='max-w-64 truncate text-[10px] text-muted-foreground'>{selectedSource ? selectedSource.fileName : '选择一条引用查看证据'}</div></div>
+          <Button size='icon-sm' variant='ghost' aria-label='关闭来源证据' onClick={() => setSourcePanel(false)}><X className='size-3.5' /></Button>
+        </div>
+        <div className='source-panel-body min-h-0 flex-1 overflow-y-auto overscroll-contain'>{selectedSource ? <SourcePanel source={selectedSource} kbId={activeKb} /> : <SourceEmpty />}</div>
+      </aside>}
     </div>
+
     {mobileConversations && <MobileDrawer title='Conversations' onClose={() => setMobileConversations(false)}>{conversationList}</MobileDrawer>}
     {mobileSource && selectedSource && <MobileDrawer title='来源证据' side='right' onClose={() => setMobileSource(false)}><SourcePanel source={selectedSource} kbId={activeKb} /></MobileDrawer>}
   </div>
 }
 
 function ConversationList({ conversations, current, onNew, onSelect }: { conversations: { id: string; title: string; updatedAt: string }[]; current: string; onNew: () => void; onSelect: (id: string) => void }) {
-  return <div className='flex h-full flex-col'><div className='flex h-14 items-center justify-between border-b px-3'><div><div className='text-xs font-semibold'>Conversations</div><div className='text-[10px] text-muted-foreground'>{conversations.length} sessions</div></div><Button size='icon-sm' variant='ghost' aria-label='新建会话' onClick={onNew}><MessageSquarePlus className='size-4' /></Button></div><div className='flex-1 overflow-y-auto p-2'>{conversations.map((conversation) => <button key={conversation.id} onClick={() => onSelect(conversation.id)} className={cn('mb-1 w-full rounded-xl px-3 py-2.5 text-left transition', current === conversation.id ? 'bg-accent font-medium shadow-sm' : 'hover:bg-accent/55')}><div className='truncate text-xs'>{conversation.title}</div><div className='mt-1 text-[10px] text-muted-foreground'>{formatDate(conversation.updatedAt)}</div></button>)}</div></div>
+  return <div className='flex h-full min-h-0 flex-col'>
+    <div className='flex h-12 shrink-0 items-center justify-between border-b px-3'><div><div className='text-xs font-semibold'>Conversations</div><div className='text-[10px] text-muted-foreground'>{conversations.length} sessions</div></div><Button size='icon-sm' variant='ghost' aria-label='新建会话' onClick={onNew}><MessageSquarePlus className='size-4' /></Button></div>
+    <div className='min-h-0 flex-1 overflow-y-auto p-2'>{conversations.map((conversation) => <button key={conversation.id} onClick={() => onSelect(conversation.id)} className={cn('mb-1 w-full rounded-xl px-3 py-2.5 text-left transition', current === conversation.id ? 'bg-accent font-medium shadow-sm' : 'hover:bg-accent/55')}><div className='truncate text-xs'>{conversation.title}</div><div className='mt-1 text-[10px] text-muted-foreground'>{formatDate(conversation.updatedAt)}</div></button>)}</div>
+  </div>
 }
 
 function LiveAssistant({ text }: { text: string }) {
-  return <div className='flex items-start gap-3'><AssistantAvatar /><div className='min-w-0 max-w-[92%] flex-1 xl:max-w-[860px]'><div className='rounded-2xl rounded-tl-md border bg-background px-5 py-4 text-sm leading-7 shadow-sm'>{text ? <MessageBody content={text} /> : <span className='animate-pulse text-muted-foreground'>正在思考…</span>}<span className='ml-1 inline-block h-4 w-0.5 animate-pulse bg-primary align-middle' /></div></div></div>
+  return <div className='flex items-start gap-3'><AssistantAvatar /><div className='min-w-0 max-w-[94%] flex-1 xl:max-w-[960px]'><div className='rounded-2xl rounded-tl-md border bg-background px-5 py-4 text-sm leading-7 shadow-sm'>{text ? <MessageBody content={text} /> : <span className='animate-pulse text-muted-foreground'>正在思考…</span>}<span className='ml-1 inline-block h-4 w-0.5 animate-pulse bg-primary align-middle' /></div></div></div>
 }
 
 function Message({ message, index, onSource }: { message: ChatMessage; index: number; onSource: (source: ChatSource) => void }) {
@@ -172,10 +269,12 @@ function Message({ message, index, onSource }: { message: ChatMessage; index: nu
   const sources = parseSources(message)
   return <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(index * .025, .15) }} className={cn('flex items-start gap-3', isUser ? 'justify-end' : 'justify-start')}>
     {!isUser && <AssistantAvatar />}
-    <div className={cn('group min-w-0', isUser ? 'max-w-[82%] sm:max-w-[68%]' : 'max-w-[92%] flex-1 xl:max-w-[860px]')}>
-      <div className={cn('rounded-2xl px-4 py-3 text-sm leading-7', isUser ? 'rounded-tr-md bg-primary text-primary-foreground shadow-sm' : 'rounded-tl-md border bg-background px-5 py-4 shadow-sm')}>{isUser ? <div className='whitespace-pre-wrap break-words'>{message.content}</div> : <MessageBody content={message.content} />}</div>
-      {sources.length > 0 && <div className='mt-2.5 flex flex-wrap items-center gap-1.5'><span className='mr-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>引用</span>{sources.map((source, sourceIndex) => <button key={`${source.documentId}-${source.chunkIndex}-${sourceIndex}`} aria-label={`查看引用 ${sourceIndex + 1}: ${source.fileName || '未命名文档'}`} onClick={() => onSource(source)} className='inline-flex max-w-64 items-center gap-1.5 rounded-lg border bg-background/90 px-2.5 py-1.5 text-[11px] text-muted-foreground shadow-sm transition hover:border-primary/30 hover:bg-primary/5 hover:text-foreground'><span className='font-semibold text-primary'>[{sourceIndex + 1}]</span><FileText className='size-3' /><span className='truncate'>{source.fileName || `来源 ${sourceIndex + 1}`}</span>{source.pageNumber != null && <span className='shrink-0'>p.{source.pageNumber}</span>}<ChevronRight className='size-3 shrink-0' /></button>)}</div>}
-      <div className='mt-1.5 flex min-h-7 items-center opacity-0 transition group-hover:opacity-100 focus-within:opacity-100'><button aria-label='复制消息' onClick={() => { void navigator.clipboard.writeText(message.content); toast.success('已复制') }} className='rounded-md p-1.5 text-muted-foreground hover:bg-accent'><Copy className='size-3' /></button></div>
+    <div className={cn('group min-w-0', isUser ? 'max-w-[82%] sm:max-w-[68%]' : 'max-w-[94%] flex-1 xl:max-w-[960px]')}>
+      <div className={cn('rounded-2xl px-4 py-3 text-sm leading-7', isUser ? 'rounded-tr-md bg-primary text-primary-foreground shadow-sm' : 'rounded-tl-md border bg-background px-5 py-4 shadow-sm')}>
+        {isUser ? <div className='whitespace-pre-wrap break-words'>{message.content}</div> : <MessageBody content={message.content} />}
+      </div>
+      {sources.length > 0 && <div className='mt-2.5 flex flex-wrap items-center gap-1.5'><span className='mr-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>引用</span>{sources.map((source, sourceIndex) => <button key={`${source.documentId}-${source.chunkIndex}-${sourceIndex}`} aria-label={`查看引用 ${sourceIndex + 1}: ${source.fileName || '未命名文档'}`} onClick={() => onSource(source)} className='inline-flex max-w-72 items-center gap-1.5 rounded-lg border bg-background/90 px-2.5 py-1.5 text-[11px] text-muted-foreground shadow-sm transition hover:border-primary/30 hover:bg-primary/5 hover:text-foreground'><span className='font-semibold text-primary'>[{sourceIndex + 1}]</span><FileText className='size-3' /><span className='truncate'>{source.fileName || `来源 ${sourceIndex + 1}`}</span>{source.pageNumber != null && <span className='shrink-0'>p.{source.pageNumber}</span>}<ChevronRight className='size-3 shrink-0' /></button>)}</div>}
+      <div className='mt-1 flex min-h-6 items-center opacity-0 transition group-hover:opacity-100 focus-within:opacity-100'><button aria-label='复制消息' onClick={() => { void navigator.clipboard.writeText(message.content); toast.success('已复制') }} className='rounded-md p-1.5 text-muted-foreground hover:bg-accent'><Copy className='size-3' /></button></div>
     </div>
     {isUser && <div className='mt-1 flex size-8 shrink-0 items-center justify-center rounded-xl border bg-secondary'><User className='size-4' /></div>}
   </motion.div>
@@ -219,12 +318,24 @@ function SourcePanel({ source, kbId }: { source: ChatSource; kbId: string }) {
       toast.error(getErrorMessage(error))
     }
   }
-  const metrics = [['Vector', source.vectorScore], ['BM25', source.bm25Score], ['RRF', source.fusionScore], ['Rerank', source.rerankScore]] as const
-  return <div className='space-y-4 p-4'><div className='rounded-xl border bg-background/70 p-3.5 shadow-sm'><div className='truncate text-sm font-semibold'>{source.fileName || '未命名文档'}</div><div className='mt-1 text-[11px] text-muted-foreground'>chunk #{source.chunkIndex ?? '—'}{source.pageNumber != null ? ` · page ${source.pageNumber}` : ''}</div></div><div><div className='mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>证据摘录</div><div className='max-h-72 overflow-y-auto whitespace-pre-wrap rounded-xl border bg-background/65 p-3.5 text-xs leading-6 text-foreground/85'>{source.excerpt || '历史消息未保存 excerpt；重新提问后会显示完整证据摘录。'}</div></div><div><div className='mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>检索分数</div><div className='grid grid-cols-2 gap-2'>{metrics.map(([label, value]) => <div key={label} className='rounded-xl border bg-background/60 p-3'><div className='text-[9px] uppercase text-muted-foreground'>{label}</div><div className='mt-1 text-sm font-semibold tabular-nums'>{formatScore(value)}</div></div>)}</div></div><div className='rounded-xl border border-primary/15 bg-primary/5 p-3.5'><div className='text-[10px] uppercase tracking-wide text-muted-foreground'>Final score</div><div className='mt-1 text-xl font-semibold tabular-nums'>{formatScore(source.score)}</div></div><Button variant='outline' className='w-full' onClick={() => void open()}>打开原始文档</Button></div>
+  const metrics = [
+    ['Vector', source.vectorScore],
+    ['BM25', source.bm25Score],
+    ['RRF', source.fusionScore],
+    ['Rerank', source.rerankScore],
+  ] as const
+
+  return <div className='space-y-4 p-4'>
+    <div className='rounded-xl border bg-background/70 p-3.5 shadow-sm'><div className='truncate text-sm font-semibold'>{source.fileName || '未命名文档'}</div><div className='mt-1 text-[11px] text-muted-foreground'>chunk #{source.chunkIndex ?? '—'}{source.pageNumber != null ? ` · page ${source.pageNumber}` : ''}</div></div>
+    <div><div className='mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>证据摘录</div><div className='whitespace-pre-wrap rounded-xl border bg-background/65 p-3.5 text-xs leading-6 text-foreground/85'>{source.excerpt || '历史消息未保存 excerpt；重新提问后会显示完整证据摘录。'}</div></div>
+    <div><div className='mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>检索分数</div><div className='grid grid-cols-2 gap-2'>{metrics.map(([label, value]) => <div key={label} className='rounded-xl border bg-background/60 p-3'><div className='text-[9px] uppercase text-muted-foreground'>{label}</div><div className='mt-1 text-sm font-semibold tabular-nums'>{formatScore(value)}</div></div>)}</div></div>
+    <div className='rounded-xl border border-primary/15 bg-primary/5 p-3.5'><div className='text-[10px] uppercase tracking-wide text-muted-foreground'>Final score</div><div className='mt-1 text-xl font-semibold tabular-nums'>{formatScore(source.score)}</div></div>
+    <Button variant='outline' className='w-full' onClick={() => void open()}>打开原始文档</Button>
+  </div>
 }
 
 function SourceEmpty() {
-  return <div className='grid h-[calc(100%-3.5rem)] place-items-center p-6 text-center'><div><div className='mx-auto mb-3 flex size-10 items-center justify-center rounded-xl border bg-background'><FileText className='size-4 text-muted-foreground' /></div><div className='text-xs font-medium'>尚未选择引用</div><div className='mt-1 max-w-52 text-[11px] leading-5 text-muted-foreground'>点击回答下方的引用，查看证据原文、页码和检索分数。</div></div></div>
+  return <div className='grid min-h-full place-items-center p-6 text-center'><div><div className='mx-auto mb-3 flex size-10 items-center justify-center rounded-xl border bg-background'><FileText className='size-4 text-muted-foreground' /></div><div className='text-xs font-medium'>尚未选择引用</div><div className='mt-1 max-w-52 text-[11px] leading-5 text-muted-foreground'>点击回答下方的引用，来源面板会在需要时打开。</div></div></div>
 }
 
 function MobileDrawer({ title, side = 'left', onClose, children }: { title: string; side?: 'left' | 'right'; onClose: () => void; children: React.ReactNode }) {
