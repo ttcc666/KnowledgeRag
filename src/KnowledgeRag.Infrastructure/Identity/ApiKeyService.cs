@@ -14,8 +14,10 @@ public sealed class ApiKeyService(AppDbContext db, TenantAccessService access)
     {
         if (actor.IsApiKey) throw new UnauthorizedAccessException("API Key 不能管理其他 API Key。");
         await access.RequireAsync(actor, tenantId, TenantRole.Admin, ct);
-        var rows = await db.ApiKeys.AsNoTracking().Where(x => x.TenantId == tenantId).OrderByDescending(x => x.CreatedAt).ToListAsync(ct);
-        return rows.Select(x => new ApiKeySummary(x.Id, x.Name, x.KeyPrefix, SplitScopes(x.Scopes), x.KnowledgeBaseId, x.IsActive, x.CreatedAt, x.ExpiresAt, x.LastUsedAt)).ToList();
+        var rows = await db.ApiKeys.AsNoTracking().Where(x => x.TenantId == tenantId).ToListAsync(ct);
+        return rows.OrderByDescending(x => x.CreatedAt)
+            .Select(x => new ApiKeySummary(x.Id, x.Name, x.KeyPrefix, SplitScopes(x.Scopes), x.KnowledgeBaseId, x.IsActive, x.CreatedAt, x.ExpiresAt, x.LastUsedAt))
+            .ToList();
     }
 
     public async Task<CreatedApiKeyResponse> CreateAsync(ActorContext actor, Guid tenantId, CreateApiKeyRequest request, CancellationToken ct = default)
