@@ -81,7 +81,12 @@ public sealed class KnowledgeSearchService(
         finally
         {
             stopwatch.Stop();
-            metrics.RecordSearch(stopwatch.Elapsed.TotalMilliseconds, result.Count, result.Count == 0 ? 0 : result[0].Score);
+            var rerankScores = result.Where(x => x.RerankScore.HasValue && x.RerankScore.Value > 0).Select(x => x.RerankScore!.Value).ToArray();
+            metrics.RecordSearch(
+                stopwatch.Elapsed.TotalMilliseconds,
+                result.Count,
+                result.Count == 0 ? 0 : result[0].Score,
+                rerankScores.Length == 0 ? null : rerankScores.Average());
         }
     }
 
