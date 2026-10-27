@@ -3,6 +3,7 @@ using System.Text.Encodings.Web;
 using KnowledgeRag.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace KnowledgeRag.Infrastructure.Identity;

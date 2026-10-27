@@ -5,6 +5,7 @@ using KnowledgeRag.Application.Contracts;
 using KnowledgeRag.Application.Security;
 using KnowledgeRag.Domain.Entities;
 using KnowledgeRag.Infrastructure.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace KnowledgeRag.Infrastructure.AI;
