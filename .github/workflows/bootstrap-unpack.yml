@@ -3,7 +3,7 @@ name: bootstrap-unpack
 on:
   push:
     paths:
-      - 'project.tar.gz.b64'
+      - 'bootstrap/READY'
 
 permissions:
   contents: write
@@ -13,11 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Unpack project source
+      - name: Reassemble and unpack project source
         shell: bash
         run: |
-          base64 -d project.tar.gz.b64 > /tmp/project.tar.gz
+          cat bootstrap/chunk-* > /tmp/project.tar.gz.b64
+          base64 -d /tmp/project.tar.gz.b64 > /tmp/project.tar.gz
+          tar -tzf /tmp/project.tar.gz >/dev/null
           tar -xzf /tmp/project.tar.gz -C .
+          rm -rf bootstrap
           rm -f project.tar.gz.b64 .bootstrap
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
