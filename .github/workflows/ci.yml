@@ -1,0 +1,118 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          cache: true
+          cache-dependency-path: '**/*.csproj'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build shadcn-admin frontend
+        working-directory: src/KnowledgeRag.Admin
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+      - name: Restore
+        run: dotnet restore KnowledgeRag.NonAzure.sln
+      - name: Build
+        run: dotnet build KnowledgeRag.NonAzure.sln -c Release --no-restore
+      - name: Test
+        run: dotnet test KnowledgeRag.NonAzure.sln -c Release --no-build --logger 'trx;LogFileName=test-results.trx'
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/TestResults/*.trx'
+          if-no-files-found: ignore
+
+  native-backends-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DATABASE_PROVIDER: PostgreSql
+      DATABASE_CONNECTION_STRING: Host=postgres;Port=5432;Database=knowledge_rag;Username=knowledge_rag;Password=knowledge_rag_dev_password
+      POSTGRES_DB: knowledge_rag
+      POSTGRES_USER: knowledge_rag
+      POSTGRES_PASSWORD: knowledge_rag_dev_password
+      SEARCH_VECTOR_BACKEND: pgvector
+      SEARCH_LEXICAL_BACKEND: postgres_fts
+      STORAGE_PROVIDER: s3
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_BUCKET: knowledge-rag
+      AUTH_SIGNING_KEY: ci-signing-key-that-is-definitely-more-than-thirty-two-bytes
+      OTEL_ENABLED: 'true'
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      RUN_EXTERNAL_BACKEND_TESTS: '1'
+      EXTERNAL_DATABASE_CONNECTION_STRING: Host=localhost;Port=5432;Database=knowledge_rag;Username=knowledge_rag;Password=knowledge_rag_dev_password
+      EXTERNAL_S3_ENDPOINT: http://localhost:9000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          cache: true
+          cache-dependency-path: '**/*.csproj'
+      - name: Start infrastructure
+        run: docker compose --profile postgres --profile s3 --profile otel up -d postgres minio minio-init otel-collector
+      - name: Wait for PostgreSQL
+        shell: bash
+        run: |
+          for i in {1..40}; do
+            if docker compose exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; then exit 0; fi
+            sleep 2
+          done
+          docker compose logs postgres
+          exit 1
+      - name: Wait for MinIO bucket initialization
+        shell: bash
+        run: |
+          cid="$(docker compose ps -q minio-init)"
+          for i in {1..40}; do
+            status="$(docker inspect -f '{{.State.Status}}' "$cid")"
+            if [ "$status" = "exited" ]; then
+              code="$(docker inspect -f '{{.State.ExitCode}}' "$cid")"
+              if [ "$code" = "0" ]; then exit 0; fi
+              docker compose logs minio minio-init
+              exit "$code"
+            fi
+            sleep 2
+          done
+          docker compose logs minio minio-init
+          exit 1
+      - name: Build and start application with native backends
+        run: docker compose --profile postgres --profile s3 --profile otel up -d --build app
+      - name: Readiness check
+        shell: bash
+        run: |
+          for i in {1..60}; do
+            if curl --fail --silent http://localhost:8080/api/health/ready >/tmp/ready.json; then
+              cat /tmp/ready.json
+              curl --fail --silent http://localhost:8080/api/health
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs app postgres minio otel-collector
+          exit 1
+      - name: Exercise pgvector, PostgreSQL FTS and MinIO through project code
+        run: dotnet test tests/KnowledgeRag.Api.IntegrationTests/KnowledgeRag.Api.IntegrationTests.csproj -c Release --filter Category=ExternalBackend
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs app postgres minio minio-init otel-collector
+      - name: Shutdown
+        if: always()
+        run: docker compose --profile postgres --profile s3 --profile otel down -v
