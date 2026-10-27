@@ -19,6 +19,11 @@ RUN dotnet publish src/KnowledgeRag.Api/KnowledgeRag.Api.csproj -c Release -o /a
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
+# Npgsql can load GSSAPI/Kerberos support at runtime even when password auth is used.
+# Install the small runtime library so container startup does not emit loader errors.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgssapi-krb5-2 \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/publish .
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "KnowledgeRag.Api.dll"]
