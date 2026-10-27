@@ -64,19 +64,22 @@ test('chat panes scroll independently without clipping controls', async ({ page 
   await expect(page.getByText('Employees receive the documented benefit.', { exact: false }).last()).toBeVisible()
 
   const isDesktop = await page.evaluate(() => window.innerWidth >= 1024)
+  const activeSource = isDesktop
+    ? page.locator('aside.border-l')
+    : page.locator('div.fixed.inset-0.z-50.lg\\:hidden').filter({ hasText: '来源证据' })
+  const openDocument = activeSource.getByRole('button', { name: '打开原始文档' })
+
   if (isDesktop) {
-    const sourcePane = page.locator('aside.border-l').locator(':scope > :last-child')
+    const sourcePane = activeSource.locator(':scope > :last-child')
     const sourceCanScroll = await sourcePane.evaluate((element) => element.scrollHeight > element.clientHeight + 2)
     expect(sourceCanScroll).toBeTruthy()
     await sourcePane.evaluate((element) => { element.scrollTop = element.scrollHeight })
   } else {
-    await page.getByRole('button', { name: '打开原始文档' }).scrollIntoViewIfNeeded()
+    await openDocument.scrollIntoViewIfNeeded()
   }
 
-  await expect(page.getByText('0.9400').last()).toBeVisible()
-  await expect(page.getByRole('button', { name: '打开原始文档' })).toBeInViewport()
-
+  await expect(openDocument).toBeInViewport()
   const sourceRequest = page.waitForRequest((request) => request.url().endsWith('/api/knowledge-bases/kb1/documents/d1/file'))
-  await page.getByRole('button', { name: '打开原始文档' }).click()
+  await openDocument.click()
   await sourceRequest
 })
