@@ -7,9 +7,28 @@
 @layer base {
   * { @apply border-border outline-ring/50; }
   html { @apply overflow-x-hidden; }
-  body { @apply min-h-svh w-full bg-background text-foreground antialiased; }
+  body {
+    @apply min-h-svh w-full bg-background text-foreground antialiased;
+    background-image:
+      radial-gradient(circle at 18% -10%, color-mix(in oklab, var(--primary) 11%, transparent) 0, transparent 34rem),
+      radial-gradient(circle at 92% 5%, color-mix(in oklab, var(--chart-2) 8%, transparent) 0, transparent 30rem);
+    background-attachment: fixed;
+  }
+  ::selection { background: color-mix(in oklab, var(--primary) 24%, transparent); }
   button:not(:disabled), [role='button']:not(:disabled) { cursor: pointer; }
+  a, button, input, textarea, select { -webkit-tap-highlight-color: transparent; }
+}
+
+@layer utilities {
+  .surface-glass { background: color-mix(in oklab, var(--card) 86%, transparent); backdrop-filter: blur(18px); }
+  .surface-elevated { box-shadow: 0 1px 2px rgb(15 23 42 / 4%), 0 12px 36px rgb(15 23 42 / 7%); }
+  .text-balance { text-wrap: balance; }
+  .app-grid { background-image: linear-gradient(to right, color-mix(in oklab, var(--border) 48%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklab, var(--border) 48%, transparent) 1px, transparent 1px); background-size: 28px 28px; }
 }
 
 @utility container { margin-inline: auto; padding-inline: 1.5rem; }
 @utility no-scrollbar { scrollbar-width: none; &::-webkit-scrollbar { display: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+}
