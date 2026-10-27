@@ -15,7 +15,7 @@ public sealed class ApiKeyAuthenticationHandler(
     AppDbContext db)
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
 {
-    public const string Scheme = "ApiKey";
+    public const string SchemeName = "ApiKey";
     public const string HeaderName = "X-Api-Key";
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
@@ -41,7 +41,7 @@ public sealed class ApiKeyAuthenticationHandler(
         };
         if (key.KnowledgeBaseId.HasValue) claims.Add(new Claim("kr:knowledge_base_id", key.KnowledgeBaseId.Value.ToString()));
         claims.AddRange(ApiKeyService.SplitScopes(key.Scopes).Select(scope => new Claim("kr:scope", scope)));
-        var identity = new ClaimsIdentity(claims, Scheme);
-        return AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), Scheme));
+        var identity = new ClaimsIdentity(claims, SchemeName);
+        return AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName));
     }
 }
