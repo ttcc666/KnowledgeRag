@@ -18,9 +18,9 @@ public sealed class RagWorkflowPolicyTests
         var result = RagWorkflowPolicy.NormalizePlan(plan, "A 和 B 的审批流程有什么区别？", 3);
 
         Assert.Equal(3, result.Queries.Count);
-        Assert.Equal("审批流程", result.Queries[0]);
-        Assert.Equal("产品审批差异", result.Queries[1]);
-        Assert.Equal("A 和 B 的审批流程有什么区别？", result.Queries[2]);
+        Assert.Equal("A 和 B 的审批流程有什么区别？", result.Queries[0]);
+        Assert.Equal("审批流程", result.Queries[1]);
+        Assert.Equal("产品审批差异", result.Queries[2]);
     }
 
     [Fact]
@@ -70,7 +70,7 @@ public sealed class RagWorkflowPolicyTests
             ["one", "two", "two", "three", "four"],
             maxQueries: 3);
 
-        Assert.Equal(["one", "two", "three"], result);
+        Assert.Equal(["original", "one", "two"], result);
     }
 
     private static SearchHit Hit(Guid pointId, Guid documentId, double score)
