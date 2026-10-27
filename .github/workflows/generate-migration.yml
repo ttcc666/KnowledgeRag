@@ -2,14 +2,16 @@ name: generate-ef-migration
 
 on:
   push:
-    branches: [ci-fix]
+    branches:
+      - ci-fix
+    paths:
+      - .migration-trigger
 
 permissions:
   contents: write
 
 jobs:
   generate:
-    if: ${{ !contains(github.event.head_commit.message, 'chore: sync EF Core model snapshot') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
