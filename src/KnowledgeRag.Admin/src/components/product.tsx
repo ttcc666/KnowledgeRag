@@ -12,8 +12,12 @@ export function PageTransition({ children, className }: { children: ReactNode; c
 export function LiveDot({ className }: { className?: string }) { return <span className={cn('relative flex size-2', className)}><span className='absolute inline-flex size-full animate-ping rounded-full bg-success opacity-50' /><span className='relative inline-flex size-2 rounded-full bg-success' /></span> }
 
 export function StatusBadge({ status }: { status: DocumentStatus }) {
-  const map: Record<DocumentStatus, { label: string; variant: 'secondary' | 'info' | 'success' | 'destructive' }> = {
-    Queued: { label: 'Queued', variant: 'secondary' }, Processing: { label: 'Processing', variant: 'info' }, Ready: { label: 'Ready', variant: 'success' }, Failed: { label: 'Failed', variant: 'destructive' },
+  const map: Record<DocumentStatus, { label: string; variant: 'secondary' | 'info' | 'success' | 'destructive' | 'outline' }> = {
+    Queued: { label: 'Queued', variant: 'secondary' },
+    Processing: { label: 'Processing', variant: 'info' },
+    Ready: { label: 'Ready', variant: 'success' },
+    Failed: { label: 'Failed', variant: 'destructive' },
+    Cancelled: { label: 'Cancelled', variant: 'outline' },
   }
   return <Badge variant={map[status].variant}>{status === 'Processing' && <span className='mr-1.5'><LiveDot /></span>}{map[status].label}</Badge>
 }
