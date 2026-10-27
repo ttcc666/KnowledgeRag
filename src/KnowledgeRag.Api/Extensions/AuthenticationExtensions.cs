@@ -24,7 +24,7 @@ internal static class AuthenticationExtensions
             .AddPolicyScheme("SmartAuth", "JWT or API Key", options =>
             {
                 options.ForwardDefaultSelector = context => context.Request.Headers.ContainsKey(ApiKeyAuthenticationHandler.HeaderName)
-                    ? ApiKeyAuthenticationHandler.Scheme
+                    ? ApiKeyAuthenticationHandler.SchemeName
                     : JwtBearerDefaults.AuthenticationScheme;
             })
             .AddJwtBearer(options =>
@@ -41,7 +41,7 @@ internal static class AuthenticationExtensions
                     ClockSkew = TimeSpan.FromMinutes(1)
                 };
             })
-            .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(ApiKeyAuthenticationHandler.Scheme, _ => { });
+            .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(ApiKeyAuthenticationHandler.SchemeName, _ => { });
 
         services.AddAuthorization();
         services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
