@@ -47,13 +47,16 @@ public sealed class KnowledgeBaseService(
             var query = db.KnowledgeBases.AsNoTracking().Where(x => x.TenantId == actor.TenantId.Value);
             if (actor.KnowledgeBaseId.HasValue) query = query.Where(x => x.Id == actor.KnowledgeBaseId.Value);
             var role = actor.HasScope(ApiKeyScopes.KnowledgeAdmin) ? KnowledgeBaseRole.Owner : actor.HasScope(ApiKeyScopes.KnowledgeWrite) ? KnowledgeBaseRole.Editor : KnowledgeBaseRole.Viewer;
-            return await query.OrderByDescending(x => x.UpdatedAt).Select(x => new KnowledgeBaseSummary(x.Id, x.TenantId, x.Name, x.Description, role, x.CreatedAt, x.UpdatedAt)).ToListAsync(ct);
+            var rows = await query.Select(x => new KnowledgeBaseSummary(x.Id, x.TenantId, x.Name, x.Description, role, x.CreatedAt, x.UpdatedAt)).ToListAsync(ct);
+            return rows.OrderByDescending(x => x.UpdatedAt).ToList();
         }
-        return await (from kb in db.KnowledgeBases.AsNoTracking()
-                      join member in db.KnowledgeBaseMembers.AsNoTracking() on kb.Id equals member.KnowledgeBaseId
-                      where member.UserId == actor.UserId
-                      orderby kb.UpdatedAt descending
-                      select new KnowledgeBaseSummary(kb.Id, kb.TenantId, kb.Name, kb.Description, member.Role, kb.CreatedAt, kb.UpdatedAt)).ToListAsync(ct);
+
+        var memberRows = await (from kb in db.KnowledgeBases.AsNoTracking()
+                                join member in db.KnowledgeBaseMembers.AsNoTracking() on kb.Id equals member.KnowledgeBaseId
+                                where member.UserId == actor.UserId
+                                select new KnowledgeBaseSummary(kb.Id, kb.TenantId, kb.Name, kb.Description, member.Role, kb.CreatedAt, kb.UpdatedAt))
+            .ToListAsync(ct);
+        return memberRows.OrderByDescending(x => x.UpdatedAt).ToList();
     }
 
     public async Task<KnowledgeBaseEntity?> GetAsync(ActorContext actor, Guid knowledgeBaseId, CancellationToken ct = default)
