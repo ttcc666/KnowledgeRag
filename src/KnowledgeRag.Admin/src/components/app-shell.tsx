@@ -201,7 +201,7 @@ export function AppShell() {
   }
 
   return (
-    <div className='min-h-svh'>
+    <div className={isChat ? 'h-svh overflow-hidden' : 'min-h-svh'}>
       <aside className={cn('fixed inset-y-0 left-0 z-40 hidden border-r border-sidebar-border transition-[width] duration-200 md:block', collapsed ? 'w-[76px]' : 'w-[248px]')}>
         {renderSidebar()}
         <button onClick={() => setCollapsed((current) => !current)} className='absolute -right-3 top-20 flex size-6 items-center justify-center rounded-full border bg-background shadow-sm' aria-label={collapsed ? '展开侧边栏' : '折叠侧边栏'}>

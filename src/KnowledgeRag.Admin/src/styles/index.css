@@ -24,6 +24,7 @@
   .surface-elevated { box-shadow: 0 1px 2px rgb(15 23 42 / 4%), 0 12px 36px rgb(15 23 42 / 7%); }
   .text-balance { text-wrap: balance; }
   .app-grid { background-image: linear-gradient(to right, color-mix(in oklab, var(--border) 48%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklab, var(--border) 48%, transparent) 1px, transparent 1px); background-size: 28px 28px; }
+
   .chat-route > div {
     display: flex;
     height: 100%;
@@ -31,13 +32,26 @@
     flex-direction: column;
     gap: 0.75rem;
   }
-  .chat-route > div > :nth-child(2) {
+
+  .chat-route > div > .grid {
     min-height: 0 !important;
     flex: 1 1 0%;
   }
-  .chat-route > div > :nth-child(2) > section,
-  .chat-route > div > :nth-child(2) > aside {
+
+  .chat-route > div > .grid > section,
+  .chat-route > div > .grid > aside {
     min-height: 0;
+    overflow: hidden;
+  }
+
+  .chat-route > div > .grid > aside.border-l {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .chat-route > div > .grid > aside.border-l > :last-child {
+    min-height: 0;
+    overflow-y: auto;
   }
 }
 
