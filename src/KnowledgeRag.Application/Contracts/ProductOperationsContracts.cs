@@ -23,8 +23,10 @@ public sealed record RetrievalMetricsSummary(
     double P95LatencyMs,
     double NoResultRate,
     double AverageTopScore,
+    double AverageRerankScore,
     long EstimatedInputTokens,
     long EstimatedOutputTokens,
+    decimal? EstimatedModelCostUsd,
     long ChatTurns);
 
 public sealed record DashboardSummary(
