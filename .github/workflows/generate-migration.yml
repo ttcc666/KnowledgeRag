@@ -1,0 +1,39 @@
+name: generate-ef-migration
+
+on:
+  push:
+    branches: [ci-fix]
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    if: ${{ !contains(github.event.head_commit.message, 'chore: sync EF Core model snapshot') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ci-fix
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore and build
+        run: |
+          dotnet restore KnowledgeRag.NonAzure.sln
+          dotnet build KnowledgeRag.NonAzure.sln -c Release --no-restore
+      - name: Install EF tool
+        run: dotnet tool install --global dotnet-ef --version 10.0.14
+      - name: Generate migration from current model
+        run: |
+          dotnet ef migrations add SyncCurrentModel \
+            --project src/KnowledgeRag.Infrastructure \
+            --startup-project src/KnowledgeRag.Api \
+            --output-dir Persistence/Migrations
+      - name: Commit generated migration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/KnowledgeRag.Infrastructure/Persistence/Migrations
+          git commit -m "chore: sync EF Core model snapshot"
+          git push origin HEAD:ci-fix
