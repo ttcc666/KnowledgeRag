@@ -55,6 +55,6 @@ test('chat streams and exposes auditable source evidence', async ({ page }) => {
   await composer.press('Enter')
   await expect(page.getByText('The policy answer.')).toBeVisible()
   await page.getByRole('button', { name: /handbook\.pdf/ }).click()
-  await expect(page.getByText('Employees receive the documented benefit.')).toBeVisible()
-  await expect(page.getByText('0.9400')).toBeVisible()
+  await expect(page.getByText('Employees receive the documented benefit.').last()).toBeVisible()
+  await expect(page.getByText('0.9400').last()).toBeVisible()
 })
