@@ -13,7 +13,8 @@ public sealed record SearchHit(
     double? VectorScore = null,
     double? Bm25Score = null,
     double? FusionScore = null,
-    double? RerankScore = null);
+    double? RerankScore = null,
+    int? PageNumber = null);
 
 public sealed record VectorCandidate(Guid PointId, double Score);
 
@@ -27,4 +28,5 @@ public sealed record HybridCandidate(
     double? VectorScore,
     double? Bm25Score,
     double FusionScore,
-    double RerankScore = 0);
+    double RerankScore = 0,
+    int? PageNumber = null);

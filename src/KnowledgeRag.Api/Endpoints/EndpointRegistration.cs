@@ -13,6 +13,7 @@ public static class EndpointRegistration
         app.MapDocumentEndpoints();
         app.MapSearchEndpoints();
         app.MapConversationEndpoints();
+        app.MapDashboardEndpoints();
         app.MapHub<DocumentProcessingHub>("/hubs/documents");
         return app;
     }

@@ -13,6 +13,24 @@ public sealed class KnowledgeBaseAccessService(AppDbContext db)
             .Where(x => x.UserId == userId && x.KnowledgeBaseId == knowledgeBaseId)
             .Select(x => (KnowledgeBaseRole?)x.Role).SingleOrDefaultAsync(cancellationToken);
 
+    public async Task<IReadOnlyList<Guid>> GetAccessibleKnowledgeBaseIdsAsync(ActorContext actor, CancellationToken cancellationToken = default)
+    {
+        if (actor.IsApiKey)
+        {
+            if (!actor.HasScope(ApiKeyScopes.KnowledgeRead) && !actor.HasScope(ApiKeyScopes.KnowledgeWrite) && !actor.HasScope(ApiKeyScopes.KnowledgeAdmin))
+                return [];
+            if (actor.KnowledgeBaseId.HasValue) return [actor.KnowledgeBaseId.Value];
+            if (!actor.TenantId.HasValue) return [];
+            return await db.KnowledgeBases.AsNoTracking().Where(x => x.TenantId == actor.TenantId.Value).Select(x => x.Id).ToListAsync(cancellationToken);
+        }
+
+        return await db.KnowledgeBaseMembers.AsNoTracking()
+            .Where(x => x.UserId == actor.UserId)
+            .Select(x => x.KnowledgeBaseId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task RequireAsync(ActorContext actor, Guid knowledgeBaseId, KnowledgeBaseRole minimumRole, CancellationToken cancellationToken = default)
     {
         if (actor.IsApiKey)

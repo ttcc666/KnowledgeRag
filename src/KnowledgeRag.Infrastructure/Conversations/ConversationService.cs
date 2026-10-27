@@ -48,6 +48,12 @@ public sealed class ConversationService(AppDbContext db, KnowledgeBaseAccessServ
     }
 
     public async Task<ChatResponse> SendAsync(ActorContext actor, Guid conversationId, string message, CancellationToken cancellationToken = default)
+        => await ExecuteTurnAsync(actor, conversationId, message, null, cancellationToken);
+
+    public async Task<ChatResponse> StreamAsync(ActorContext actor, Guid conversationId, string message, Func<string, CancellationToken, Task> onDelta, CancellationToken cancellationToken = default)
+        => await ExecuteTurnAsync(actor, conversationId, message, onDelta, cancellationToken);
+
+    private async Task<ChatResponse> ExecuteTurnAsync(ActorContext actor, Guid conversationId, string message, Func<string, CancellationToken, Task>? onDelta, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(message)) throw new InvalidOperationException("消息不能为空。");
         var gate = Locks.GetOrAdd(conversationId, _ => new SemaphoreSlim(1, 1));
@@ -56,16 +62,19 @@ public sealed class ConversationService(AppDbContext db, KnowledgeBaseAccessServ
         {
             var conversation = await GetOwnedConversationAsync(actor, conversationId, cancellationToken);
             await access.RequireAsync(actor, conversation.KnowledgeBaseId, KnowledgeBaseRole.Viewer, cancellationToken);
-            var result = await agent.AskAsync(conversation.KnowledgeBaseId, message, conversation.AgentSessionJson, cancellationToken);
+            var result = onDelta is null
+                ? await agent.AskAsync(conversation.KnowledgeBaseId, message, conversation.AgentSessionJson, cancellationToken)
+                : await agent.StreamAsync(conversation.KnowledgeBaseId, message, conversation.AgentSessionJson, onDelta, cancellationToken);
             var now = DateTimeOffset.UtcNow;
             if (conversation.Title == "新会话") conversation.Title = message.Length <= 40 ? message : message[..40] + "…";
             conversation.AgentSessionJson = result.SessionJson;
             conversation.UpdatedAt = now;
+            var sources = result.Sources.Select(ToSource).ToList();
             db.ChatMessages.AddRange(
                 new ChatMessageEntity { Id = Guid.NewGuid(), ConversationId = conversation.Id, Role = "user", Content = message, CreatedAt = now },
-                new ChatMessageEntity { Id = Guid.NewGuid(), ConversationId = conversation.Id, Role = "assistant", Content = result.Answer, SourcesJson = JsonSerializer.Serialize(result.Sources.Select(ToSource)), CreatedAt = now.AddTicks(1) });
+                new ChatMessageEntity { Id = Guid.NewGuid(), ConversationId = conversation.Id, Role = "assistant", Content = result.Answer, SourcesJson = JsonSerializer.Serialize(sources), CreatedAt = now.AddTicks(1) });
             await db.SaveChangesAsync(cancellationToken);
-            return new ChatResponse(conversation.Id, result.Answer, result.Sources.Select(ToSource).ToList());
+            return new ChatResponse(conversation.Id, result.Answer, sources);
         }
         finally { gate.Release(); }
     }
@@ -84,5 +93,8 @@ public sealed class ConversationService(AppDbContext db, KnowledgeBaseAccessServ
         return await query.SingleOrDefaultAsync(ct) ?? throw new KeyNotFoundException("会话不存在。");
     }
 
-    private static ChatSource ToSource(SearchHit hit) => new(hit.DocumentId, hit.FileName, hit.ChunkIndex, hit.SourceLink, hit.Score);
+    private static ChatSource ToSource(SearchHit hit)
+        => new(hit.DocumentId, hit.FileName, hit.ChunkIndex, hit.SourceLink, hit.Score,
+            hit.Text.Length <= 1400 ? hit.Text : hit.Text[..1400] + "…", hit.PageNumber,
+            hit.VectorScore, hit.Bm25Score, hit.FusionScore, hit.RerankScore);
 }

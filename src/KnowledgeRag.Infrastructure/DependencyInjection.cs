@@ -5,6 +5,7 @@ using KnowledgeRag.Infrastructure.Documents;
 using KnowledgeRag.Infrastructure.Identity;
 using KnowledgeRag.Infrastructure.KnowledgeBases;
 using KnowledgeRag.Infrastructure.Messaging;
+using KnowledgeRag.Infrastructure.Observability;
 using KnowledgeRag.Infrastructure.Persistence;
 using KnowledgeRag.Infrastructure.Search;
 using KnowledgeRag.Infrastructure.Storage;
@@ -21,7 +22,9 @@ public static class DependencyInjection
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration, IHostEnvironment environment)
     {
         services.Configure<OpenTelemetryOptions>(configuration.GetSection(OpenTelemetryOptions.SectionName));
-
+        services.AddSingleton<ProductMetricsCollector>();
+        services.AddScoped<DashboardService>();
+        services.AddScoped<ProductSettingsService>();
         services.AddPersistence(configuration, environment);
         services.AddAiModule(configuration);
         services.AddStorageModule(configuration);
@@ -39,14 +42,12 @@ public static class DependencyInjection
     {
         var database = configuration.GetSection(DatabaseOptions.SectionName).Get<DatabaseOptions>() ?? new DatabaseOptions();
         var searchBackends = configuration.GetSection(SearchBackendOptions.SectionName).Get<SearchBackendOptions>() ?? new SearchBackendOptions();
-
         await using var scope = services.CreateAsyncScope();
         if (database.AutoMigrate)
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             await db.Database.MigrateAsync(cancellationToken);
         }
-
         if (!searchBackends.AutoInitializeNativeIndexes) return;
         if (searchBackends.Vector.Equals("pgvector", StringComparison.OrdinalIgnoreCase))
             await scope.ServiceProvider.GetRequiredService<PgVectorStore>().EnsureReadyAsync(cancellationToken);

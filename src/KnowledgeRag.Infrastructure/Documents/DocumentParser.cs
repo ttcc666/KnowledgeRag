@@ -17,7 +17,6 @@ public sealed class DocumentParser
     public async Task<string> ExtractTextAsync(string filePath, CancellationToken cancellationToken = default)
     {
         var extension = Path.GetExtension(filePath).ToLowerInvariant();
-
         return extension switch
         {
             ".pdf" => ExtractPdf(filePath),
@@ -31,8 +30,11 @@ public sealed class DocumentParser
     {
         using var document = PdfDocument.Open(filePath);
         var builder = new StringBuilder();
+        var pageNumber = 0;
         foreach (var page in document.GetPages())
         {
+            pageNumber++;
+            builder.Append("[[PAGE:").Append(pageNumber).AppendLine("]] ");
             builder.AppendLine(page.Text);
             builder.AppendLine();
         }

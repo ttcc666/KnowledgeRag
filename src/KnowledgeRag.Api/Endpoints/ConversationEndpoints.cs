@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using KnowledgeRag.Api.Security;
 
 namespace KnowledgeRag.Api.Endpoints;
@@ -29,6 +30,21 @@ public static class ConversationEndpoints
 
         group.MapPost("/{conversationId:guid}/messages", async (Guid conversationId, SendMessageRequest request, ClaimsPrincipal principal, ConversationService service, CancellationToken ct) =>
             Results.Ok(await service.SendAsync(HttpActorContext.From(principal), conversationId, request.Message, ct)));
+
+        group.MapPost("/{conversationId:guid}/messages/stream", async (Guid conversationId, SendMessageRequest request, ClaimsPrincipal principal, ConversationService service, HttpResponse response, CancellationToken ct) =>
+        {
+            response.ContentType = "text/event-stream";
+            response.Headers.CacheControl = "no-cache";
+            response.Headers.Connection = "keep-alive";
+            async Task SendEventAsync(string eventName, object payload, CancellationToken token)
+            {
+                await response.WriteAsync($"event: {eventName}\ndata: {JsonSerializer.Serialize(payload)}\n\n", token);
+                await response.Body.FlushAsync(token);
+            }
+            var result = await service.StreamAsync(HttpActorContext.From(principal), conversationId, request.Message,
+                (delta, token) => SendEventAsync("delta", new { text = delta }, token), ct);
+            await SendEventAsync("complete", result, ct);
+        });
 
         group.MapDelete("/{conversationId:guid}", async (Guid conversationId, ClaimsPrincipal principal, ConversationService service, CancellationToken ct) =>
         {
