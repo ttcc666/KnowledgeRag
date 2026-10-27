@@ -31,7 +31,7 @@ public sealed class DashboardService(AppDbContext db, KnowledgeBaseAccessService
                 docs.Count(x => DateOnly.FromDateTime(x.UpdatedAt.UtcDateTime) == date),
                 conversations.Count(x => DateOnly.FromDateTime(x.UpdatedAt.UtcDateTime) == date));
         }).ToList();
-        var recent = docs.OrderByDescending(x => x.UpdatedAt).Take(12).Select(x => ToJob(x, names.GetValueOrDefault(x.KnowledgeBaseId, "Unknown"), now)).ToList();
+        var jobs = BuildJobs(docs, names, now);
         return new DashboardSummary(
             knowledgeBases.Count,
             docs.Count(x => x.Status == DocumentStatus.Ready),
@@ -41,7 +41,7 @@ public sealed class DashboardService(AppDbContext db, KnowledgeBaseAccessService
             docs.Sum(x => x.ChunkCount),
             conversations.Count,
             activity,
-            recent,
+            jobs.OrderByDescending(x => x.UpdatedAt).Take(12).ToList(),
             metrics.Snapshot());
     }
 
@@ -51,13 +51,25 @@ public sealed class DashboardService(AppDbContext db, KnowledgeBaseAccessService
         if (ids.Count == 0) return [];
         var names = await db.KnowledgeBases.AsNoTracking().Where(x => ids.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.Name, cancellationToken);
         var docs = await db.Documents.AsNoTracking().Where(x => ids.Contains(x.KnowledgeBaseId)).ToListAsync(cancellationToken);
-        var now = DateTimeOffset.UtcNow;
-        return docs.OrderByDescending(x => x.UpdatedAt).Take(500).Select(x => ToJob(x, names.GetValueOrDefault(x.KnowledgeBaseId, "Unknown"), now)).ToList();
+        return BuildJobs(docs, names, DateTimeOffset.UtcNow).OrderByDescending(x => x.UpdatedAt).Take(500).ToList();
     }
 
-    private static IngestionJobSummary ToJob(DocumentEntity doc, string kbName, DateTimeOffset now)
-        => new(doc.Id, doc.KnowledgeBaseId, kbName, doc.FileName, doc.Status, doc.ChunkCount, doc.LastError,
-            doc.CreatedAt, doc.UpdatedAt, Math.Max(0, ((doc.Status is DocumentStatus.Queued or DocumentStatus.Processing ? now : doc.UpdatedAt) - doc.CreatedAt).TotalSeconds));
+    private static IReadOnlyList<IngestionJobSummary> BuildJobs(IReadOnlyList<DocumentEntity> docs, IReadOnlyDictionary<Guid, string> names, DateTimeOffset now)
+    {
+        var queued = docs.Where(x => x.Status == DocumentStatus.Queued).OrderBy(x => x.CreatedAt).Select((doc, index) => new { doc.Id, Position = index + 1 }).ToDictionary(x => x.Id, x => x.Position);
+        return docs.Select(doc => new IngestionJobSummary(
+            doc.Id,
+            doc.KnowledgeBaseId,
+            names.GetValueOrDefault(doc.KnowledgeBaseId, "Unknown"),
+            doc.FileName,
+            doc.Status,
+            doc.ChunkCount,
+            doc.LastError,
+            doc.CreatedAt,
+            doc.UpdatedAt,
+            Math.Max(0, ((doc.Status is DocumentStatus.Queued or DocumentStatus.Processing ? now : doc.UpdatedAt) - doc.CreatedAt).TotalSeconds),
+            queued.TryGetValue(doc.Id, out var position) ? position : null)).ToList();
+    }
 
     private static IReadOnlyList<DailyActivityPoint> BuildEmptyActivity()
     {
