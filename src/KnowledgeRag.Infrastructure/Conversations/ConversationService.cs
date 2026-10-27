@@ -35,14 +35,16 @@ public sealed class ConversationService(AppDbContext db, KnowledgeBaseAccessServ
             await access.RequireAsync(actor, knowledgeBaseId.Value, KnowledgeBaseRole.Viewer, cancellationToken);
             query = query.Where(x => x.KnowledgeBaseId == knowledgeBaseId.Value);
         }
-        return await query.OrderByDescending(x => x.UpdatedAt).Take(200).ToListAsync(cancellationToken);
+        var rows = await query.ToListAsync(cancellationToken);
+        return rows.OrderByDescending(x => x.UpdatedAt).Take(200).ToList();
     }
 
     public async Task<IReadOnlyList<ChatMessageEntity>> GetMessagesAsync(ActorContext actor, Guid conversationId, CancellationToken cancellationToken = default)
     {
         var conversation = await GetOwnedConversationAsync(actor, conversationId, cancellationToken);
         await access.RequireAsync(actor, conversation.KnowledgeBaseId, KnowledgeBaseRole.Viewer, cancellationToken);
-        return await db.ChatMessages.AsNoTracking().Where(x => x.ConversationId == conversationId).OrderBy(x => x.CreatedAt).ToListAsync(cancellationToken);
+        var rows = await db.ChatMessages.AsNoTracking().Where(x => x.ConversationId == conversationId).ToListAsync(cancellationToken);
+        return rows.OrderBy(x => x.CreatedAt).ToList();
     }
 
     public async Task<ChatResponse> SendAsync(ActorContext actor, Guid conversationId, string message, CancellationToken cancellationToken = default)
