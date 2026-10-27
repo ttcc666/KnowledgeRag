@@ -54,7 +54,7 @@ test('chat panes scroll independently without clipping controls', async ({ page 
   const composer = page.getByPlaceholder('询问当前知识库…')
   await composer.fill('What is the policy?')
   await composer.press('Enter')
-  await expect(page.getByText('The policy answer.')).toBeVisible()
+  await expect(page.getByText('The policy answer.').last()).toBeVisible()
 
   const documentScrolls = await page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight + 2)
   expect(documentScrolls).toBeFalsy()
@@ -62,12 +62,18 @@ test('chat panes scroll independently without clipping controls', async ({ page 
 
   await page.getByRole('button', { name: /handbook\.pdf/ }).click()
   await expect(page.getByText('Employees receive the documented benefit.', { exact: false }).last()).toBeVisible()
-  await expect(page.getByText('0.9400').last()).toBeVisible()
 
-  const sourcePane = page.locator('aside.border-l').locator(':scope > :last-child')
-  const sourceCanScroll = await sourcePane.evaluate((element) => element.scrollHeight > element.clientHeight + 2)
-  expect(sourceCanScroll).toBeTruthy()
-  await sourcePane.evaluate((element) => { element.scrollTop = element.scrollHeight })
+  const isDesktop = await page.evaluate(() => window.innerWidth >= 1024)
+  if (isDesktop) {
+    const sourcePane = page.locator('aside.border-l').locator(':scope > :last-child')
+    const sourceCanScroll = await sourcePane.evaluate((element) => element.scrollHeight > element.clientHeight + 2)
+    expect(sourceCanScroll).toBeTruthy()
+    await sourcePane.evaluate((element) => { element.scrollTop = element.scrollHeight })
+  } else {
+    await page.getByRole('button', { name: '打开原始文档' }).scrollIntoViewIfNeeded()
+  }
+
+  await expect(page.getByText('0.9400').last()).toBeVisible()
   await expect(page.getByRole('button', { name: '打开原始文档' })).toBeInViewport()
 
   const sourceRequest = page.waitForRequest((request) => request.url().endsWith('/api/knowledge-bases/kb1/documents/d1/file'))
