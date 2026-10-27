@@ -15,4 +15,14 @@ public sealed class RagOptions
     public int EmbeddingBatchSize { get; set; } = 16;
     public int UpsertBatchSize { get; set; } = 32;
     public int MaxUploadMegabytes { get; set; } = 30;
+
+    // Agent workflow controls.
+    public bool EnableAgentWorkflow { get; set; } = true;
+    public bool EnablePlanner { get; set; } = true;
+    public int PlannerMaxQueries { get; set; } = 3;
+    public int MultiQueryTopK { get; set; } = 6;
+    public int MaxMergedEvidence { get; set; } = 10;
+    public bool EnableReviewer { get; set; } = true;
+    public int ReviewerMaxRetries { get; set; } = 1;
+    public double ReviewerMinConfidence { get; set; } = 0.65;
 }
