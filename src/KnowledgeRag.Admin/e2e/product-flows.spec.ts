@@ -50,8 +50,9 @@ test('failed ingestion can be retried from operations', async ({ page }) => {
 
 test('chat streams and exposes auditable source evidence', async ({ page }) => {
   await page.goto('/chat')
-  await page.getByPlaceholder('询问当前知识库…').fill('What is the policy?')
-  await page.getByRole('button').filter({ has: page.locator('svg.lucide-send') }).click()
+  const composer = page.getByPlaceholder('询问当前知识库…')
+  await composer.fill('What is the policy?')
+  await composer.press('Enter')
   await expect(page.getByText('The policy answer.')).toBeVisible()
   await page.getByRole('button', { name: /handbook\.pdf/ }).click()
   await expect(page.getByText('Employees receive the documented benefit.')).toBeVisible()
