@@ -1,16 +1,16 @@
 services:
   qdrant:
     image: qdrant/qdrant:v1.20.0
+    restart: unless-stopped
     ports:
       - "6333:6333"
-      - "6334:6334"
     volumes:
-      - qdrant_data:/qdrant/storage
-    restart: unless-stopped
+      - qdrant-data:/qdrant/storage
 
   postgres:
     image: pgvector/pgvector:pg17
     profiles: ["postgres"]
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-knowledge_rag}
       POSTGRES_USER: ${POSTGRES_USER:-knowledge_rag}
@@ -18,43 +18,59 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-knowledge_rag} -d ${POSTGRES_DB:-knowledge_rag}"]
       interval: 5s
       timeout: 5s
       retries: 20
-    restart: unless-stopped
 
+  # Bundled S3-compatible development fixture.
+  # The application itself remains compatible with external MinIO/AWS S3 via S3_ENDPOINT.
   minio:
-    image: minio/minio:latest
+    image: rustfs/rustfs-x86-musl:v2.3.1
     profiles: ["s3"]
-    command: server /data --console-address ":9001"
+    restart: unless-stopped
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY:-RUSTFSADMIN}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_KEY:-rustfsadmin123}
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+      RUSTFS_CONSOLE_ENABLE: "true"
     ports:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - minio_data:/data
-    restart: unless-stopped
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:9000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
 
   minio-init:
-    image: minio/mc:latest
+    image: rustfs/rc:latest
     profiles: ["s3"]
     depends_on:
-      - minio
-    entrypoint: >
-      /bin/sh -c "
-      until mc alias set local http://minio:9000 ${S3_ACCESS_KEY:-minioadmin} ${S3_SECRET_KEY:-minioadmin}; do sleep 2; done;
-      mc mb --ignore-existing local/${S3_BUCKET:-knowledge-rag};
-      exit 0;
-      "
+      minio:
+        condition: service_healthy
+    environment:
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY:-RUSTFSADMIN}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_KEY:-rustfsadmin123}
+      S3_BUCKET: ${S3_BUCKET:-knowledge-rag}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        /usr/bin/rc alias set local http://minio:9000 "$${RUSTFS_ACCESS_KEY}" "$${RUSTFS_SECRET_KEY}" --region us-east-1 --bucket-lookup path
+        /usr/bin/rc bucket create "local/$${S3_BUCKET}" --ignore-existing
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
+    image: otel/opentelemetry-collector-contrib:0.136.0
     profiles: ["otel"]
+    restart: unless-stopped
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
     volumes:
       - ./observability/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
@@ -62,55 +78,64 @@ services:
       - "4317:4317"
       - "4318:4318"
       - "8889:8889"
-    restart: unless-stopped
 
   app:
     build:
       context: .
       dockerfile: src/KnowledgeRag.Api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      qdrant:
+        condition: service_started
     environment:
       ASPNETCORE_URLS: http://+:8080
-      AI__BaseUrl: ${AI_BASE_URL:-https://api.openai.com/v1}
-      AI__ApiKey: ${AI_API_KEY:-}
-      AI__ChatModel: ${AI_CHAT_MODEL:-gpt-4o-mini}
-      AI__EmbeddingModel: ${AI_EMBEDDING_MODEL:-text-embedding-3-small}
-      AI__EmbeddingDimensions: ${AI_EMBEDDING_DIMENSIONS:-1536}
-      AI__SendEmbeddingDimensions: ${AI_SEND_EMBEDDING_DIMENSIONS:-false}
-      Qdrant__BaseUrl: http://qdrant:6333
-      Qdrant__Collection: ${QDRANT_COLLECTION:-knowledge_chunks}
-      SearchBackend__Vector: ${SEARCH_VECTOR_BACKEND:-qdrant}
-      SearchBackend__Lexical: ${SEARCH_LEXICAL_BACKEND:-bm25}
-      SearchBackend__PostgresTextSearchConfig: ${POSTGRES_FTS_CONFIG:-simple}
-      Database__Provider: ${DATABASE_PROVIDER:-Sqlite}
-      Database__ConnectionString: ${DATABASE_CONNECTION_STRING:-Data Source=/app/App_Data/knowledge.db}
-      Database__AutoMigrate: ${DATABASE_AUTO_MIGRATE:-true}
-      Auth__SigningKey: ${AUTH_SIGNING_KEY:-CHANGE-ME-IN-PRODUCTION-AT-LEAST-32-CHARS}
-      Auth__AllowRegistration: ${AUTH_ALLOW_REGISTRATION:-true}
-      Auth__AccessTokenLifetimeMinutes: ${AUTH_ACCESS_TOKEN_MINUTES:-60}
-      Auth__RefreshTokenLifetimeDays: ${AUTH_REFRESH_TOKEN_DAYS:-30}
-      Storage__Provider: ${STORAGE_PROVIDER:-local}
-      S3__Endpoint: ${S3_ENDPOINT:-http://minio:9000}
-      S3__Region: ${S3_REGION:-us-east-1}
-      S3__Bucket: ${S3_BUCKET:-knowledge-rag}
-      S3__AccessKey: ${S3_ACCESS_KEY:-minioadmin}
-      S3__SecretKey: ${S3_SECRET_KEY:-minioadmin}
-      S3__ForcePathStyle: ${S3_FORCE_PATH_STYLE:-true}
-      Reranker__Mode: ${RERANKER_MODE:-local}
-      Reranker__Model: ${RERANKER_MODEL:-}
-      OpenTelemetry__Enabled: ${OTEL_ENABLED:-true}
-      OpenTelemetry__ServiceName: ${OTEL_SERVICE_NAME:-KnowledgeRag.NonAzure}
-      OpenTelemetry__OtlpEndpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
-      OpenTelemetry__ConsoleExporter: ${OTEL_CONSOLE_EXPORTER:-false}
+      AI__BASEURL: ${AI_BASE_URL:-https://api.openai.com/v1}
+      AI__APIKEY: ${AI_API_KEY:-}
+      AI__CHATMODEL: ${AI_CHAT_MODEL:-gpt-4o-mini}
+      AI__EMBEDDINGMODEL: ${AI_EMBEDDING_MODEL:-text-embedding-3-small}
+      AI__EMBEDDINGDIMENSIONS: ${AI_EMBEDDING_DIMENSIONS:-1536}
+      AI__SENDEMBEDDINGDIMENSIONS: ${AI_SEND_EMBEDDING_DIMENSIONS:-false}
+      QDRANT__ENDPOINT: http://qdrant:6333
+      QDRANT__COLLECTION: ${QDRANT_COLLECTION:-knowledge_chunks}
+      DATABASE__PROVIDER: ${DATABASE_PROVIDER:-Sqlite}
+      DATABASE__CONNECTIONSTRING: ${DATABASE_CONNECTION_STRING:-Data Source=/app/App_Data/knowledge.db}
+      DATABASE__AUTOMIGRATE: ${DATABASE_AUTO_MIGRATE:-true}
+      SEARCHBACKEND__VECTOR: ${SEARCH_VECTOR_BACKEND:-qdrant}
+      SEARCHBACKEND__LEXICAL: ${SEARCH_LEXICAL_BACKEND:-bm25}
+      SEARCHBACKEND__POSTGRESFTSCONFIGURATION: ${POSTGRES_FTS_CONFIG:-simple}
+      RAG__TOPK: ${RAG_TOP_K:-5}
+      RAG__CANDIDATECOUNT: ${RAG_CANDIDATE_COUNT:-30}
+      RAG__CHUNKSIZE: ${RAG_CHUNK_SIZE:-1200}
+      RAG__CHUNKOVERLAP: ${RAG_CHUNK_OVERLAP:-200}
+      RERANKER__MODE: ${RERANKER_MODE:-local}
+      RERANKER__MODEL: ${RERANKER_MODEL:-}
+      AUTH__ISSUER: ${AUTH_ISSUER:-KnowledgeRag}
+      AUTH__AUDIENCE: ${AUTH_AUDIENCE:-KnowledgeRag.Client}
+      AUTH__SIGNINGKEY: ${AUTH_SIGNING_KEY:-please-change-this-to-a-long-random-secret-at-least-32-characters}
+      AUTH__ACCESSTOKENMINUTES: ${AUTH_ACCESS_TOKEN_MINUTES:-60}
+      AUTH__REFRESHTOKENDAYS: ${AUTH_REFRESH_TOKEN_DAYS:-30}
+      AUTH__ALLOWREGISTRATION: ${AUTH_ALLOW_REGISTRATION:-true}
+      STORAGE__PROVIDER: ${STORAGE_PROVIDER:-local}
+      STORAGE__ROOTPATH: /app/App_Data/files
+      S3__ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      S3__REGION: ${S3_REGION:-us-east-1}
+      S3__BUCKET: ${S3_BUCKET:-knowledge-rag}
+      S3__ACCESSKEY: ${S3_ACCESS_KEY:-RUSTFSADMIN}
+      S3__SECRETKEY: ${S3_SECRET_KEY:-rustfsadmin123}
+      S3__FORCEPATHSTYLE: ${S3_FORCE_PATH_STYLE:-true}
+      OPENTELEMETRY__ENABLED: ${OTEL_ENABLED:-true}
+      OPENTELEMETRY__SERVICENAME: ${OTEL_SERVICE_NAME:-KnowledgeRag.NonAzure}
+      OPENTELEMETRY__OTLPENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OPENTELEMETRY__CONSOLEEXPORTER: ${OTEL_CONSOLE_EXPORTER:-false}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8080:8080"
     volumes:
-      - app_data:/app/App_Data
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    restart: unless-stopped
+      - app-data:/app/App_Data
 
 volumes:
-  qdrant_data:
-  postgres_data:
-  minio_data:
-  app_data:
+  qdrant-data:
+  postgres-data:
+  minio-data:
+  app-data:
