@@ -1,6 +1,7 @@
 using KnowledgeRag.Application.Contracts;
 using KnowledgeRag.Infrastructure.Conversations;
 using KnowledgeRag.Infrastructure.Search;
+using Xunit;
 
 namespace KnowledgeRag.Api.IntegrationTests;
 
