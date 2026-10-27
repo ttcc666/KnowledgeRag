@@ -1,13 +1,16 @@
 {
   "name": "knowledge-rag-admin",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "build:api": "tsc -b && vite build --outDir ../KnowledgeRag.Api/wwwroot --emptyOutDir",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -21,6 +24,7 @@
     "@tanstack/react-query": "^5.99.0",
     "@tanstack/react-router": "^1.168.22",
     "@tanstack/react-table": "^8.21.3",
+    "@xyflow/react": "^12.12.0",
     "axios": "^1.15.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -39,11 +43,18 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^25.0.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^6.0.1",
+    "axe-core": "^4.11.0",
+    "jsdom": "^27.0.1",
     "typescript": "~6.0.3",
-    "vite": "^8.0.8"
+    "vite": "^8.0.8",
+    "vitest": "^5.0.5"
   }
 }
