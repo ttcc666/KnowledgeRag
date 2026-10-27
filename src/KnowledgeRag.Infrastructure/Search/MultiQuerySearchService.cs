@@ -57,14 +57,19 @@ public sealed class MultiQuerySearchService(
     public static IReadOnlyList<string> NormalizeQueries(string originalQuery, IEnumerable<string>? queries, int maxQueries)
     {
         var limit = Math.Clamp(maxQueries, 1, 8);
-        return (queries ?? [])
-            .Append(originalQuery)
-            .Select(x => x?.Trim())
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(limit)
-            .Cast<string>()
-            .ToList();
+        var original = originalQuery.Trim();
+        var result = new List<string>(limit);
+        if (!string.IsNullOrWhiteSpace(original)) result.Add(original);
+
+        foreach (var variant in queries ?? [])
+        {
+            var query = variant?.Trim();
+            if (string.IsNullOrWhiteSpace(query) || result.Contains(query, StringComparer.OrdinalIgnoreCase)) continue;
+            if (result.Count >= limit) break;
+            result.Add(query);
+        }
+
+        return result;
     }
 
     private async Task<IReadOnlyList<SearchHit>> SearchOneAsync(Guid knowledgeBaseId, string query, CancellationToken cancellationToken)
