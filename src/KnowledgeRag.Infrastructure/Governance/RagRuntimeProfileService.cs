@@ -25,9 +25,12 @@ public sealed record ResolvedRagProfile(
     Guid? PromptProfileId,
     string? PlannerPrompt,
     string? AnswerPrompt,
-    string? ReviewerPrompt,
-    ResolvedAiEndpoint ChatEndpoint,
-    ResolvedAiEndpoint? RerankerEndpoint);
+    string? ReviewerPrompt)
+{
+    public ResolvedAiEndpoint ChatEndpoint { get; init; } = new(
+        null, null, AiProviderTypes.OpenAiCompatible, "https://api.openai.com/v1", string.Empty, "gpt-4o-mini", 0, false);
+    public ResolvedAiEndpoint? RerankerEndpoint { get; init; }
+}
 
 /// <summary>
 /// Resolves an immutable RAG execution snapshot once per scoped request. Conversation budget
@@ -97,9 +100,11 @@ public sealed class RagRuntimeProfileService(
             profile?.PromptProfileId,
             NullIfWhiteSpace(prompt?.PlannerPrompt),
             AppendMandatoryPolicy(prompt?.AnswerPrompt, AnswerCitationPolicy),
-            AppendMandatoryPolicy(prompt?.ReviewerPrompt, ReviewerCitationPolicy),
-            chatEndpoint,
-            rerankerEndpoint);
+            AppendMandatoryPolicy(prompt?.ReviewerPrompt, ReviewerCitationPolicy))
+        {
+            ChatEndpoint = chatEndpoint,
+            RerankerEndpoint = rerankerEndpoint
+        };
 
         _resolved[knowledgeBaseId] = resolved;
         return resolved;
