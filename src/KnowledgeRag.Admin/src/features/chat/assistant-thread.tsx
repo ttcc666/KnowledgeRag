@@ -181,8 +181,8 @@ function AssistantMessage({
       <div className='mt-1 flex size-8 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm'>
         <Sparkles className='size-4' />
       </div>
-      <div className='min-w-0 flex-1'>
-        <div className='max-w-[960px] text-sm leading-7 sm:text-[14px]'>
+      <div className='min-w-0 w-full max-w-[960px] flex-1'>
+        <div className='w-full text-sm leading-7 sm:text-[14px]'>
           <MessagePrimitive.Parts>
             {({ part }) => part.type === 'text'
               ? <div className='break-words'><GroundedText text={part.text} sources={sources} onSource={onSource} /><MessagePartPrimitive.InProgress><span className='ml-1 inline-block h-4 w-0.5 animate-pulse bg-primary align-middle' /></MessagePartPrimitive.InProgress></div>
@@ -232,9 +232,9 @@ function AssistantMessage({
   )
 }
 
-function GroundedText({ text, sources, onSource }: { text: string; sources: ChatSource[]; onSource: (source: ChatSource) => void }) {
+export function GroundedText({ text, sources, onSource }: { text: string; sources: ChatSource[]; onSource: (source: ChatSource) => void }) {
   const segments = useMemo(() => text.split('```'), [text])
-  return <div className='space-y-2'>
+  return <div className='space-y-3'>
     {segments.map((segment, segmentIndex) => {
       if (segmentIndex % 2 === 1) {
         const lines = segment.replace(/^\n/, '').split('\n')
@@ -243,28 +243,90 @@ function GroundedText({ text, sources, onSource }: { text: string; sources: Chat
         const code = (hasLanguage ? lines.slice(1) : lines).join('\n').trimEnd()
         return <pre key={segmentIndex} className='overflow-x-auto rounded-xl border bg-muted/55 p-3 text-xs leading-5'><code>{code}</code></pre>
       }
-      return <div key={segmentIndex} className='space-y-1.5'>{renderMarkdownLines(segment, sources, onSource, segmentIndex)}</div>
+      return <div key={segmentIndex} className='space-y-2.5'>{renderMarkdownBlocks(segment, sources, onSource, segmentIndex)}</div>
     })}
   </div>
 }
 
-function renderMarkdownLines(text: string, sources: ChatSource[], onSource: (source: ChatSource) => void, keyPrefix: number) {
-  return text.split('\n').map((line, index) => {
-    const key = `${keyPrefix}-${index}`
-    if (!line.trim()) return <div key={key} className='h-1.5' />
-    if (line.startsWith('### ')) return <h4 key={key} className='pt-1 text-sm font-semibold'>{renderInline(line.slice(4), sources, onSource)}</h4>
-    if (line.startsWith('## ')) return <h3 key={key} className='pt-1 text-base font-semibold'>{renderInline(line.slice(3), sources, onSource)}</h3>
-    if (line.startsWith('# ')) return <h2 key={key} className='pt-1 text-lg font-semibold'>{renderInline(line.slice(2), sources, onSource)}</h2>
-    if (/^[-*] /.test(line)) return <div key={key} className='flex gap-2 pl-1'><span aria-hidden='true'>•</span><span>{renderInline(line.slice(2), sources, onSource)}</span></div>
-    const ordered = line.match(/^(\d+)\.\s+(.*)$/)
-    if (ordered) return <div key={key} className='flex gap-2 pl-1'><span className='min-w-5 tabular-nums text-muted-foreground'>{ordered[1]}.</span><span>{renderInline(ordered[2], sources, onSource)}</span></div>
-    return <p key={key}>{renderInline(line, sources, onSource)}</p>
-  })
+function renderMarkdownBlocks(text: string, sources: ChatSource[], onSource: (source: ChatSource) => void, keyPrefix: number) {
+  const lines = text.split('\n')
+  const blocks: ReactNode[] = []
+  let index = 0
+
+  while (index < lines.length) {
+    const line = lines[index]
+    const trimmed = line.trim()
+    if (!trimmed) {
+      index += 1
+      continue
+    }
+
+    const heading = line.match(/^\s{0,3}(#{1,3})\s+(.+)$/)
+    if (heading) {
+      const content = renderInline(heading[2], sources, onSource, `${keyPrefix}-${index}-heading`)
+      if (heading[1].length === 1) blocks.push(<h2 key={`${keyPrefix}-${index}`} className='pt-1 text-lg font-semibold tracking-tight'>{content}</h2>)
+      else if (heading[1].length === 2) blocks.push(<h3 key={`${keyPrefix}-${index}`} className='pt-1 text-base font-semibold tracking-tight'>{content}</h3>)
+      else blocks.push(<h4 key={`${keyPrefix}-${index}`} className='pt-0.5 text-sm font-semibold'>{content}</h4>)
+      index += 1
+      continue
+    }
+
+    const unordered = line.match(/^\s*[-*]\s+(.+)$/)
+    if (unordered) {
+      const items: { key: string; content: string }[] = []
+      while (index < lines.length) {
+        const match = lines[index].match(/^\s*[-*]\s+(.+)$/)
+        if (!match) break
+        items.push({ key: `${keyPrefix}-${index}`, content: match[1] })
+        index += 1
+      }
+      blocks.push(
+        <ul key={`${keyPrefix}-${items[0].key}-ul`} className='list-disc space-y-1.5 pl-5 marker:text-muted-foreground'>
+          {items.map((item) => <li key={item.key} className='pl-1'>{renderInline(item.content, sources, onSource, `${item.key}-inline`)}</li>)}
+        </ul>,
+      )
+      continue
+    }
+
+    const ordered = line.match(/^\s*(\d+)\.\s+(.+)$/)
+    if (ordered) {
+      const start = Number(ordered[1])
+      const items: { key: string; content: string }[] = []
+      while (index < lines.length) {
+        const match = lines[index].match(/^\s*(\d+)\.\s+(.+)$/)
+        if (!match) break
+        items.push({ key: `${keyPrefix}-${index}`, content: match[2] })
+        index += 1
+      }
+      blocks.push(
+        <ol key={`${keyPrefix}-${items[0].key}-ol`} start={start} className='list-decimal space-y-1.5 pl-6 marker:font-medium marker:text-muted-foreground'>
+          {items.map((item) => <li key={item.key} className='pl-1'>{renderInline(item.content, sources, onSource, `${item.key}-inline`)}</li>)}
+        </ol>,
+      )
+      continue
+    }
+
+    const quote = line.match(/^\s*>\s?(.*)$/)
+    if (quote) {
+      blocks.push(
+        <blockquote key={`${keyPrefix}-${index}`} className='border-l-2 border-primary/20 pl-3 text-foreground/80'>
+          {renderInline(quote[1], sources, onSource, `${keyPrefix}-${index}-quote`)}
+        </blockquote>,
+      )
+      index += 1
+      continue
+    }
+
+    blocks.push(<p key={`${keyPrefix}-${index}`}>{renderInline(trimmed, sources, onSource, `${keyPrefix}-${index}-paragraph`)}</p>)
+    index += 1
+  }
+
+  return blocks
 }
 
-function renderInline(text: string, sources: ChatSource[], onSource: (source: ChatSource) => void): ReactNode[] {
+function renderInline(text: string, sources: ChatSource[], onSource: (source: ChatSource) => void, keyPrefix = 'inline'): ReactNode[] {
   const nodes: ReactNode[] = []
-  const token = /(\[(\d{1,3})\]|\*\*([^*]+)\*\*)/g
+  const token = /(\[(\d{1,3})\]|\*\*([^*]+)\*\*|`([^`\n]+)`)/g
   let cursor = 0
   let match: RegExpExecArray | null
   while ((match = token.exec(text)) !== null) {
@@ -273,10 +335,12 @@ function renderInline(text: string, sources: ChatSource[], onSource: (source: Ch
       const citation = Number(match[2])
       const source = citation >= 1 && citation <= sources.length ? sources[citation - 1] : undefined
       nodes.push(source
-        ? <button key={`citation-${match.index}`} type='button' onClick={() => onSource(source)} className='mx-0.5 inline-flex rounded-md border border-primary/20 bg-primary/5 px-1.5 py-0.5 align-baseline text-[11px] font-semibold leading-none text-primary hover:bg-primary/10' aria-label={`查看引用 ${citation}: ${source.fileName}`}>[{citation}]</button>
+        ? <button key={`${keyPrefix}-citation-${match.index}`} type='button' onClick={() => onSource(source)} className='mx-0.5 inline-flex rounded-md border border-primary/20 bg-primary/5 px-1.5 py-0.5 align-baseline text-[11px] font-semibold leading-none text-primary hover:bg-primary/10' aria-label={`查看引用 ${citation}: ${source.fileName || '未命名文档'}`}>[{citation}]</button>
         : match[0])
     } else if (match[3]) {
-      nodes.push(<strong key={`strong-${match.index}`} className='font-semibold'>{match[3]}</strong>)
+      nodes.push(<strong key={`${keyPrefix}-strong-${match.index}`} className='font-semibold'>{renderInline(match[3], sources, onSource, `${keyPrefix}-strong-${match.index}`)}</strong>)
+    } else if (match[4]) {
+      nodes.push(<code key={`${keyPrefix}-code-${match.index}`} className='rounded-md border bg-muted/60 px-1.5 py-0.5 font-mono text-[0.9em] text-foreground'>{match[4]}</code>)
     }
     cursor = match.index + match[0].length
   }
