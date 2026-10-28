@@ -109,19 +109,23 @@ test('official assistant-ui Thread renders ordered turns, in-message workflow, c
   await expect(page.getByText('policy', { exact: true }).last()).toBeVisible()
   await expect(page.getByText('Grounded in the handbook')).toBeVisible()
 
-  const messageRoots = page.locator('[data-slot="aui_message-group"] > [data-role]')
+  const messageRoots = page.locator('[data-slot="aui_message-group"] [data-role]')
   await expect(messageRoots).toHaveCount(2)
   expect(await messageRoots.evaluateAll((elements) => elements.map((element) => element.getAttribute('data-role')))).toEqual(['user', 'assistant'])
 
   const assistantMessage = page.locator('[data-slot="aui_assistant-message-root"]')
   await expect(assistantMessage.getByText('Agent workflow · 完成', { exact: false })).toBeVisible()
-  await expect(assistantMessage.getByText('问题分析完成', { exact: true })).toBeVisible()
+  await expect(assistantMessage.getByText('回答已完成', { exact: true })).toBeVisible()
   await expect(page.getByTestId('run-status-bar')).toHaveCount(0)
 
   const sourceChip = page.locator('a[data-slot="source"][href="#kr-source-1-m2"]')
   const inlineCitation = page.locator('a[href="#kr-citation-1-m2"]')
   await expect(sourceChip).toContainText('[1] handbook.pdf')
   await expect(inlineCitation).toHaveText('1')
+
+  const feedbackRequest = page.waitForRequest((request) => request.url().endsWith('/api/conversations/c1/messages/m2/feedback'))
+  await page.getByRole('button', { name: 'Helpful', exact: true }).click()
+  await feedbackRequest
 
   await sourceChip.click()
   if (isDesktop) await expect(page.getByTestId('source-panel')).toBeVisible()
@@ -134,10 +138,6 @@ test('official assistant-ui Thread renders ordered turns, in-message workflow, c
     await inlineCitation.click()
     await expect(page.getByTestId('source-panel')).toBeVisible()
   }
-
-  const feedbackRequest = page.waitForRequest((request) => request.url().endsWith('/api/conversations/c1/messages/m2/feedback'))
-  await page.getByRole('button', { name: 'Helpful', exact: true }).click()
-  await feedbackRequest
 
   const documentScrolls = await page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight + 2)
   expect(documentScrolls).toBeFalsy()
