@@ -64,6 +64,26 @@ public sealed class WebhookChannelAdapterTests
     }
 
     [Fact]
+    public async Task FeishuAdapter_TestEvent_UsesLegacyCompatibleDivSummary()
+    {
+        var delivery = new WebhookDeliveryRequested(
+            Guid.Parse("44444444-4444-4444-4444-444444444444"),
+            Guid.NewGuid(), Guid.NewGuid(), "webhook.test",
+            "{\"message\":\"KnowledgeRag webhook test\",\"at\":\"2026-10-28T08:20:40.9221159+00:00\"}",
+            DateTimeOffset.Parse("2026-10-28T08:20:40Z"));
+        using var request = WebhookChannelAdapterRegistry.Get("feishu").CreateRequest(
+            new Uri("https://example.com/hook"), delivery, "{}", "fallback", null);
+        using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+
+        var elements = body.RootElement.GetProperty("card").GetProperty("elements");
+        var summary = elements[0];
+        Assert.Equal("div", summary.GetProperty("tag").GetString());
+        Assert.Equal("lark_md", summary.GetProperty("text").GetProperty("tag").GetString());
+        Assert.Contains("Webhook Automation", summary.GetProperty("text").GetProperty("content").GetString());
+        Assert.DoesNotContain(elements.EnumerateArray(), element => element.GetProperty("tag").GetString() == "markdown");
+    }
+
+    [Fact]
     public async Task DingTalkAdapter_UsesMarkdownMessage()
     {
         using var request = CreateProviderRequest("dingtalk");
