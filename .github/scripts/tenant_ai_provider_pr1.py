@@ -23,10 +23,6 @@ replace_once(
     rag,
     '    RagRuntimeProfileService runtimeProfiles,\n    IOptions<AiOptions> aiOptions,',
     '    RagRuntimeProfileService runtimeProfiles,\n    AiProviderClientFactory aiClientFactory,\n    IOptions<AiOptions> aiOptions,')
-replace_once(
-    rag,
-    '        null,\n        null,\n        null,\n        null);',
-    '        null,\n        null,\n        null,\n        null,\n        new ResolvedAiEndpoint(null, null, AiProviderTypes.OpenAiCompatible, _ai.BaseUrl, _ai.ApiKey, _ai.ChatModel, 0, false),\n        null);')
 replace_all(
     rag,
     '            Math.Min(profile.MultiQueryTopK, profile.MaxMergedEvidence));',
