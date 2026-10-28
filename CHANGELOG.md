@@ -73,6 +73,8 @@
 
 ### Fixed
 
+- 修复 assistant-ui Thread List / 分页切换的瞬态状态可能让 Chat runtime 收到尚未出现在 regular/archived 列表中的 `threadId` 或异常消息项，进而在构建 Source 索引时访问 `undefined.id` 并使页面崩溃的问题；Chat 现在只暴露已注册 thread，并在分页消息边界过滤空值与畸形项。
+- 修复 React StrictMode 下 Document Processing SignalR effect cleanup 可能在初始 negotiation 尚未完成时调用 `stop()` 并产生 `The connection was stopped during negotiation` 的问题；cleanup 现在等待 `start()` settle 后再停止该 effect 实例的连接。
 - 修复 Reviewer 已通过但答案仍可能在 Citation normalize 之前通过 SSE 暂时显示 raw `[E#]` / 越界引用的问题；客户端现在只收到最终 Citation Gate 处理后的答案。
 - 修复 Chat 在 `InvalidCitationCount > 0` 或知识型回答没有有效 Citation 时仍可能保存正文的问题；Final Answer Citation Gate 现在 fail-closed 为安全证据不足响应且不暴露可信 Source。
 - 修复 Budget Reservation 与 Agent 分别解析 KB Profile，导致并发配置更新时两者可能使用不同 execution snapshot 的一致性风险。

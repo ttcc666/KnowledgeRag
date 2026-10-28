@@ -52,8 +52,15 @@ export function DocumentProcessingNotifications() {
       }
     })
 
-    void connection.start().catch(() => undefined)
-    return () => { void connection.stop() }
+    // React StrictMode intentionally mounts, cleans up and mounts effects again in development.
+    // Do not stop a SignalR connection while its initial negotiation is still in progress: wait
+    // for start() to settle first, then stop the connection created by this effect instance.
+    const startPromise = connection.start().catch(() => undefined)
+    return () => {
+      void startPromise
+        .then(() => connection.stop())
+        .catch(() => undefined)
+    }
   }, [accessToken, queryClient, updateProcessing])
 
   return null
