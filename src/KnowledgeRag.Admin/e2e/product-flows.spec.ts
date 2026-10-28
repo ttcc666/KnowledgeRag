@@ -76,7 +76,7 @@ test('assistant-ui chat shows workflow progress and keeps on-demand sources', as
   }
 
   await composer.fill('What is the policy?')
-  await composer.press('Enter')
+  await page.getByRole('button', { name: '发送消息' }).click()
   await expect(page.getByText('The policy answer.').last()).toBeVisible()
   await expect(page.getByRole('region', { name: 'Agent 执行过程' })).toBeVisible()
   await page.getByRole('button', { name: /执行过程/ }).click()
