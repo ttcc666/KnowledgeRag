@@ -39,13 +39,30 @@ public static class ConversationEndpoints
             response.ContentType = "text/event-stream";
             response.Headers.CacheControl = "no-cache";
             response.Headers.Connection = "keep-alive";
+            response.Headers["X-Accel-Buffering"] = "no";
+
+            using var writeGate = new SemaphoreSlim(1, 1);
             async Task SendEventAsync(string eventName, object payload, CancellationToken token)
             {
-                await response.WriteAsync($"event: {eventName}\ndata: {JsonSerializer.Serialize(payload)}\n\n", token);
-                await response.Body.FlushAsync(token);
+                await writeGate.WaitAsync(token);
+                try
+                {
+                    await response.WriteAsync($"event: {eventName}\ndata: {JsonSerializer.Serialize(payload, WebJson)}\n\n", token);
+                    await response.Body.FlushAsync(token);
+                }
+                finally
+                {
+                    writeGate.Release();
+                }
             }
-            var result = await service.StreamAsync(HttpActorContext.From(principal), conversationId, request.Message,
-                (delta, token) => SendEventAsync("delta", new { text = delta }, token), ct);
+
+            var result = await service.StreamAsync(
+                HttpActorContext.From(principal),
+                conversationId,
+                request.Message,
+                (delta, token) => SendEventAsync("delta", new { text = delta }, token),
+                (progress, token) => SendEventAsync("progress", progress, token),
+                ct);
             await SendEventAsync("complete", result, ct);
         });
 

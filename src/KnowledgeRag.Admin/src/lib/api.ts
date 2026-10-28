@@ -1,6 +1,6 @@
 import axios, { AxiosError, type AxiosRequestConfig } from 'axios'
 import { useAuthStore } from '@/stores/auth-store'
-import type { ApiKeySummary, AuthResponse, ChatMessage, ChatResponse, Conversation, CreatedApiKey, DashboardSummary, IngestionJobSummary, KnowledgeBaseMember, KnowledgeBaseSummary, KnowledgeDocument, ProductSettingsSummary, SearchHit, TenantMember, TenantSummary, UploadResponse, UserSummary } from './types'
+import type { ApiKeySummary, AuthResponse, ChatMessage, ChatResponse, Conversation, CreatedApiKey, DashboardSummary, IngestionJobSummary, KnowledgeBaseMember, KnowledgeBaseSummary, KnowledgeDocument, ProductSettingsSummary, RagProgressEvent, SearchHit, TenantMember, TenantSummary, UploadResponse, UserSummary } from './types'
 
 const baseURL = import.meta.env.VITE_API_BASE_URL || ''
 export const http = axios.create({ baseURL })
@@ -20,7 +20,13 @@ http.interceptors.response.use((response) => response, async (error: AxiosError)
 
 export function getErrorMessage(error: unknown) { if (axios.isAxiosError(error)) { const data = error.response?.data as { error?: string; title?: string } | undefined; return data?.error || data?.title || error.message } return error instanceof Error ? error.message : '请求失败' }
 
-async function streamConversation(id: string, message: string, onDelta: (text: string) => void, signal?: AbortSignal): Promise<ChatResponse> {
+async function streamConversation(
+  id: string,
+  message: string,
+  onDelta: (text: string) => void,
+  signal?: AbortSignal,
+  onProgress?: (event: RagProgressEvent) => void,
+): Promise<ChatResponse> {
   const response = await fetch(`${baseURL}/api/conversations/${id}/messages/stream`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${useAuthStore.getState().accessToken}` }, body: JSON.stringify({ message }), signal })
   if (!response.ok || !response.body) throw new Error(`Streaming request failed (${response.status})`)
   const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let final: ChatResponse | null = null
@@ -32,6 +38,7 @@ async function streamConversation(id: string, message: string, onDelta: (text: s
       const event = frame.split('\n').find((x) => x.startsWith('event:'))?.slice(6).trim(); const data = frame.split('\n').filter((x) => x.startsWith('data:')).map((x) => x.slice(5).trim()).join('\n')
       if (!data) continue
       if (event === 'delta') onDelta((JSON.parse(data) as { text: string }).text)
+      if (event === 'progress') onProgress?.(JSON.parse(data) as RagProgressEvent)
       if (event === 'complete') final = JSON.parse(data) as ChatResponse
     }
   }
