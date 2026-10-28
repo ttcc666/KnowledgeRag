@@ -55,7 +55,7 @@ test('governance center exposes evaluation, profile, trace, cost, audit, automat
 
   await page.getByRole('button', { name: '成本 / 模型' }).click()
   await expect(page.getByText('strong-model')).toBeVisible()
-  await expect(page.getByText('$0.1245')).toBeVisible()
+  await expect(page.getByText('$0.1245').last()).toBeVisible()
 
   await page.getByRole('button', { name: 'Audit Log' }).click()
   await expect(page.getByText('knowledge-base')).toBeVisible()
