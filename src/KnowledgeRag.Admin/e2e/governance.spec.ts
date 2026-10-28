@@ -40,7 +40,7 @@ test('governance center exposes evaluation, profile, trace, cost, audit, automat
   await page.goto('/governance')
   await expect(page.getByRole('heading', { name: 'AI Governance Center' })).toBeVisible()
   await expect(page.getByText('12', { exact: true })).toBeVisible()
-  await expect(page.getByText('Regression')).toBeVisible()
+  await expect(page.getByRole('combobox').filter({ hasText: 'Regression' })).toBeVisible()
   await expect(page.getByText('90%', { exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: 'RAG 配置' }).click()
