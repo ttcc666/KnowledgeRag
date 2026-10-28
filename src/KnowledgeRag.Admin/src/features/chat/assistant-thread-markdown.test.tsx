@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { GroundedText } from './assistant-thread'
 import type { ChatSource } from '@/lib/types'
 
@@ -11,6 +11,8 @@ const source: ChatSource = {
   score: 0.94,
   excerpt: 'Evidence',
 }
+
+afterEach(cleanup)
 
 describe('GroundedText', () => {
   it('renders indented lists and inline code as structured content', () => {
@@ -38,7 +40,7 @@ describe('GroundedText', () => {
 
   it('keeps citation trust boundaries while improving markdown presentation', () => {
     const onSource = vi.fn()
-    render(
+    const { container } = render(
       <GroundedText
         text={'可信引用 [1]，不存在的引用 [2]，以及 <script>alert(1)</script>。'}
         sources={[source]}
@@ -51,6 +53,6 @@ describe('GroundedText', () => {
     expect(onSource).toHaveBeenCalledWith(source)
     expect(screen.queryByRole('button', { name: /查看引用 2/ })).not.toBeInTheDocument()
     expect(screen.getByText(/不存在的引用 \[2\]/)).toBeInTheDocument()
-    expect(document.querySelector('script')).toBeNull()
+    expect(container.querySelector('script')).toBeNull()
   })
 })
