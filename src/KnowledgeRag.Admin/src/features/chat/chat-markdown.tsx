@@ -79,7 +79,7 @@ export function SourceExcerptMarkdown({ text }: { text: string }) {
           h4: ({ children }) => <h4 className='mb-1.5 mt-3 font-semibold first:mt-0'>{children}</h4>,
           p: ({ children }) => <p className='my-2 first:mt-0 last:mb-0'>{children}</p>,
           ul: ({ children }) => <ul className='my-2 list-disc space-y-1 pl-5 marker:text-muted-foreground'>{children}</ul>,
-          ol: ({ children }) => <ol className='my-2 list-decimal space-y-1 pl-5 marker:text-muted-foreground'>{children}</ol>,
+          ol: ({ children, start }) => <ol start={start} className='my-2 list-decimal space-y-1 pl-5 marker:text-muted-foreground'>{children}</ol>,
           li: ({ children }) => <li className='pl-0.5'>{children}</li>,
           blockquote: ({ children }) => <blockquote className='my-2 border-l-2 border-primary/25 pl-3 text-foreground/75'>{children}</blockquote>,
           pre: ({ children }) => <pre className='my-2 overflow-x-auto rounded-lg border bg-muted/55 p-3 text-[11px] leading-5'>{children}</pre>,
