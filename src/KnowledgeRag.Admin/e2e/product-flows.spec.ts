@@ -86,11 +86,15 @@ test('failed ingestion can be retried from operations', async ({ page }) => {
   await request
 })
 
-test('assistant-ui chat shows validated inline citations, workflow progress and on-demand sources', async ({ page }) => {
+test('official assistant-ui Thread renders chat, sources, feedback and KnowledgeRag evidence', async ({ page }) => {
   await page.goto('/chat')
   const isDesktop = await page.evaluate(() => window.innerWidth >= 1024)
-  const composer = page.getByPlaceholder('询问当前知识库…')
+  const thread = page.locator('.aui-thread-root')
+  const composer = page.getByRole('textbox', { name: 'Message input' })
 
+  await expect(thread).toBeVisible()
+  await expect(page.locator('[data-slot="aui_composer-shell"]')).toBeVisible()
+  await expect(composer).toHaveAttribute('placeholder', 'Send a message...')
   await expect(composer).toBeInViewport()
   if (isDesktop) {
     await expect(page.getByTestId('conversation-panel')).toBeVisible()
@@ -98,26 +102,31 @@ test('assistant-ui chat shows validated inline citations, workflow progress and 
   }
 
   await composer.fill('What is the policy?')
-  await page.getByRole('button', { name: '发送消息' }).click()
+  await page.getByRole('button', { name: 'Send message' }).click()
   await expect(page.getByText('policy', { exact: true }).last()).toBeVisible()
-  const inlineCitation = page.getByRole('paragraph').getByRole('button', { name: '查看引用 1: handbook.pdf' })
-  await expect(inlineCitation).toBeVisible()
   await expect(page.getByText('Grounded in the handbook')).toBeVisible()
-  await expect(page.getByRole('region', { name: 'Agent 执行过程' })).toBeVisible()
-  await page.getByRole('button', { name: /执行过程/ }).click()
+  await expect(page.locator('[data-slot="source"]').filter({ hasText: 'handbook.pdf' })).toBeVisible()
+
+  const workflowToggle = page.getByRole('button', { name: /Agent workflow complete/ })
+  await expect(workflowToggle).toBeVisible()
+  await workflowToggle.click()
   await expect(page.getByText('问题分析完成')).toBeVisible()
   await expect(page.getByText('检索、融合与重排完成')).toBeVisible()
   await expect(page.getByText('证据审核通过')).toBeVisible()
 
   const feedbackRequest = page.waitForRequest((request) => request.url().endsWith('/api/conversations/c1/messages/m2/feedback'))
-  await page.getByRole('button', { name: '回答有帮助' }).click()
+  await page.getByRole('button', { name: 'Helpful' }).click()
   await feedbackRequest
 
   const documentScrolls = await page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight + 2)
   expect(documentScrolls).toBeFalsy()
   await expect(composer).toBeInViewport()
 
-  await inlineCitation.click()
+  if (isDesktop) {
+    await page.getByRole('button', { name: '打开来源证据' }).click()
+  } else {
+    await page.getByRole('button', { name: '查看来源证据' }).click()
+  }
   await expect(page.getByText('Employees receive the documented benefit.', { exact: false }).last()).toBeVisible()
 
   const activeSource = isDesktop
@@ -140,19 +149,26 @@ test('assistant-ui chat shows validated inline citations, workflow progress and 
   }
 })
 
-test('assistant-ui thread list can rename, archive and restore a conversation', async ({ page }) => {
+test('official assistant-ui ThreadList can rename, archive and restore a conversation', async ({ page }) => {
   await page.goto('/chat')
   const isDesktop = await page.evaluate(() => window.innerWidth >= 1024)
   if (!isDesktop) return
 
-  page.once('dialog', (dialog) => dialog.accept('Renamed policy'))
+  await expect(page.locator('[data-slot="aui_thread-list-root"]')).toBeVisible()
+  await expect(page.getByRole('searchbox', { name: 'Search threads' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'More options' }).click()
+  await page.getByText('Rename', { exact: true }).click()
+  const renameInput = page.getByRole('textbox', { name: 'Rename thread' })
+  await renameInput.fill('Renamed policy')
   const renameRequest = page.waitForRequest((request) => request.url().endsWith('/api/conversations/c1') && request.method() === 'PATCH')
-  await page.getByRole('button', { name: '重命名会话' }).click()
+  await renameInput.press('Enter')
   await renameRequest
   await expect(page.getByText('Renamed policy')).toBeVisible()
 
+  await page.getByRole('button', { name: 'More options' }).click()
   const archiveRequest = page.waitForRequest((request) => request.url().endsWith('/api/conversations/c1/archive') && request.method() === 'POST')
-  await page.getByRole('button', { name: '归档会话' }).click()
+  await page.getByText('Archive', { exact: true }).click()
   await archiveRequest
   await expect(page.getByText('Archived')).toBeVisible()
   await expect(page.getByRole('button', { name: '恢复会话' })).toBeVisible()
@@ -160,5 +176,5 @@ test('assistant-ui thread list can rename, archive and restore a conversation', 
   const restoreRequest = page.waitForRequest((request) => request.url().endsWith('/api/conversations/c1/archive') && request.method() === 'DELETE')
   await page.getByRole('button', { name: '恢复会话' }).click()
   await restoreRequest
-  await expect(page.getByRole('button', { name: '归档会话' })).toBeVisible()
+  await expect(page.getByText('Renamed policy')).toBeVisible()
 })
