@@ -41,6 +41,15 @@ public sealed class RagRunAccountingService(
         var reservationCost = reservationLines.Sum(x => x.CostUsd);
         var now = DateTimeOffset.UtcNow;
 
+        if (profile.DailyRunLimit <= 0 && profile.MonthlyBudgetUsd <= 0)
+        {
+            var reservation = CreateReservation(actor, tenantId, knowledgeBaseId, conversationId, query, profile,
+                reservationLines, reservationCost, now);
+            db.RagRuns.Add(reservation);
+            await db.SaveChangesAsync(ct);
+            return reservation;
+        }
+
         for (var attempt = 0; attempt < 3; attempt++)
         {
             try
@@ -68,36 +77,8 @@ public sealed class RagRunAccountingService(
                     .ToList();
                 RagBudgetPolicy.EnsureAllowed(profile, snapshots, reservationCost, now);
 
-                var reservation = new RagRunEntity
-                {
-                    Id = Guid.NewGuid(),
-                    TenantId = tenantId,
-                    KnowledgeBaseId = knowledgeBaseId,
-                    ConversationId = conversationId,
-                    UserId = actor.UserId,
-                    ApiKeyId = actor.ApiKeyId,
-                    Query = query,
-                    Answer = string.Empty,
-                    Status = "reserved",
-                    AnswerModel = profile.AnswerModel,
-                    AgentMode = profile.AgentMode,
-                    SourceCount = 0,
-                    EstimatedInputTokens = reservationLines.Sum(x => x.InputTokens),
-                    EstimatedOutputTokens = reservationLines.Sum(x => x.OutputTokens),
-                    EstimatedCostUsd = reservationCost,
-                    LatencyMs = 0,
-                    TraceJson = JsonSerializer.Serialize(new object[]
-                    {
-                        new
-                        {
-                            type = "usage.reservation",
-                            estimated = true,
-                            reservedCostUsd = reservationCost,
-                            lineItems = reservationLines
-                        }
-                    }, WebJson),
-                    CreatedAt = now
-                };
+                var reservation = CreateReservation(actor, tenantId, knowledgeBaseId, conversationId, query, profile,
+                    reservationLines, reservationCost, now);
                 db.RagRuns.Add(reservation);
                 await db.SaveChangesAsync(ct);
                 await transaction.CommitAsync(ct);
@@ -161,6 +142,47 @@ public sealed class RagRunAccountingService(
         await db.SaveChangesAsync(ct);
         return run;
     }
+
+    private static RagRunEntity CreateReservation(
+        ActorContext actor,
+        Guid tenantId,
+        Guid knowledgeBaseId,
+        Guid? conversationId,
+        string query,
+        ResolvedRagProfile profile,
+        IReadOnlyList<AiUsageLineItem> reservationLines,
+        decimal reservationCost,
+        DateTimeOffset now)
+        => new()
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            KnowledgeBaseId = knowledgeBaseId,
+            ConversationId = conversationId,
+            UserId = actor.UserId,
+            ApiKeyId = actor.ApiKeyId,
+            Query = query,
+            Answer = string.Empty,
+            Status = "reserved",
+            AnswerModel = profile.AnswerModel,
+            AgentMode = profile.AgentMode,
+            SourceCount = 0,
+            EstimatedInputTokens = reservationLines.Sum(x => x.InputTokens),
+            EstimatedOutputTokens = reservationLines.Sum(x => x.OutputTokens),
+            EstimatedCostUsd = reservationCost,
+            LatencyMs = 0,
+            TraceJson = JsonSerializer.Serialize(new object[]
+            {
+                new
+                {
+                    type = "usage.reservation",
+                    estimated = true,
+                    reservedCostUsd = reservationCost,
+                    lineItems = reservationLines
+                }
+            }, WebJson),
+            CreatedAt = now
+        };
 
     private async Task<IReadOnlyList<AiUsageLineItem>> PriceAsync(Guid tenantId, IReadOnlyList<AiUsageEstimate> estimates, CancellationToken ct)
     {
