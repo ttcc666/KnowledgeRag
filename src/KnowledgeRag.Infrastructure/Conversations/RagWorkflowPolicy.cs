@@ -18,16 +18,40 @@ public static class RagWorkflowPolicy
         return normalized;
     }
 
+    /// <summary>
+    /// Combines evidence from multiple retrieval rounds without comparing round-local reranker
+    /// scores directly. Raw fusion scores are normalized across the combined candidate set. The
+    /// Score fallback only applies to synthetic/legacy hits that do not carry FusionScore.
+    /// </summary>
     public static IReadOnlyList<SearchHit> MergeEvidence(
         IEnumerable<SearchHit>? current,
         IEnumerable<SearchHit>? supplemental,
         int maxEvidence)
     {
-        return (current ?? [])
+        var combined = (current ?? [])
             .Concat(supplemental ?? [])
             .GroupBy(x => x.PointId)
-            .Select(group => group.OrderByDescending(x => x.Score).First())
+            .Select(group => group
+                .OrderByDescending(x => x.FusionScore ?? x.Score)
+                .ThenByDescending(x => x.Score)
+                .First())
+            .ToList();
+        if (combined.Count == 0) return [];
+
+        var fusionValues = combined.Select(x => x.FusionScore ?? x.Score).ToArray();
+        var minFusion = fusionValues.Min();
+        var maxFusion = fusionValues.Max();
+        var range = maxFusion - minFusion;
+
+        return combined
+            .Select(x => x with
+            {
+                Score = range <= 1e-12
+                    ? Math.Clamp(x.FusionScore ?? x.Score, 0, 1)
+                    : Math.Clamp(((x.FusionScore ?? x.Score) - minFusion) / range, 0, 1)
+            })
             .OrderByDescending(x => x.Score)
+            .ThenBy(x => x.PointId)
             .Take(Math.Clamp(maxEvidence, 1, 40))
             .ToList();
     }

@@ -6,6 +6,13 @@ using KnowledgeRag.Infrastructure.Tenancy;
 
 namespace KnowledgeRag.Api.Endpoints;
 
+public sealed record EvaluationCaseCreateV3(
+    string Category,
+    string Query,
+    string? ExpectedAnswerContains,
+    bool RequiresKnowledge = true,
+    IReadOnlyList<EvaluationExpectedSource>? ExpectedSources = null);
+
 public static class GovernanceEndpoints
 {
     public static IEndpointRouteBuilder MapGovernanceEndpoints(this IEndpointRouteBuilder app)
@@ -82,10 +89,22 @@ public static class GovernanceEndpoints
             Results.Ok(await service.CreateEvaluationDatasetAsync(HttpActorContext.From(principal), tenantId, request, ct)));
 
         group.MapGet("/evaluation/datasets/{datasetId:guid}/cases", async (Guid tenantId, Guid datasetId, ClaimsPrincipal principal, GovernanceService service, CancellationToken ct) =>
-            Results.Ok(await service.ListEvaluationCasesAsync(HttpActorContext.From(principal), tenantId, datasetId, ct)));
+        {
+            var rows = await service.ListEvaluationCasesAsync(HttpActorContext.From(principal), tenantId, datasetId, ct);
+            return Results.Ok(rows.Select(ToEvaluationCaseResponse));
+        });
 
-        group.MapPost("/evaluation/datasets/{datasetId:guid}/cases", async (Guid tenantId, Guid datasetId, ClaimsPrincipal principal, EvaluationCaseCreate request, GovernanceService service, CancellationToken ct) =>
-            Results.Ok(await service.AddEvaluationCaseAsync(HttpActorContext.From(principal), tenantId, datasetId, request, ct)));
+        group.MapPost("/evaluation/datasets/{datasetId:guid}/cases", async (Guid tenantId, Guid datasetId, ClaimsPrincipal principal, EvaluationCaseCreateV3 request, GovernanceService service, CancellationToken ct) =>
+        {
+            var storedExpectation = EvaluationExpectationCodec.Serialize(request.ExpectedAnswerContains, request.ExpectedSources);
+            var row = await service.AddEvaluationCaseAsync(
+                HttpActorContext.From(principal),
+                tenantId,
+                datasetId,
+                new EvaluationCaseCreate(request.Category, request.Query, storedExpectation, request.RequiresKnowledge),
+                ct);
+            return Results.Ok(ToEvaluationCaseResponse(row));
+        });
 
         group.MapGet("/evaluation/runs", async (Guid tenantId, Guid? datasetId, ClaimsPrincipal principal, GovernanceService service, CancellationToken ct) =>
             Results.Ok(await service.ListEvaluationRunsAsync(HttpActorContext.From(principal), tenantId, datasetId, ct)));
@@ -94,6 +113,22 @@ public static class GovernanceEndpoints
             Results.Ok(await service.RunAsync(HttpActorContext.From(principal), tenantId, datasetId, ct)));
 
         return app;
+    }
+
+    private static object ToEvaluationCaseResponse(EvaluationCaseEntity item)
+    {
+        var expectation = EvaluationExpectationCodec.Parse(item.ExpectedAnswerContains);
+        return new
+        {
+            item.Id,
+            item.DatasetId,
+            item.Category,
+            item.Query,
+            ExpectedAnswerContains = expectation.AnswerContains,
+            ExpectedSources = expectation.Sources,
+            item.RequiresKnowledge,
+            item.CreatedAt
+        };
     }
 
     private static object ToWebhookResponse(WebhookSubscriptionEntity hook) => new

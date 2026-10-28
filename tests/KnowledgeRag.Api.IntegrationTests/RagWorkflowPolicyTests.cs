@@ -48,19 +48,31 @@ public sealed class RagWorkflowPolicyTests
     }
 
     [Fact]
-    public void MergeEvidence_deduplicates_chunks_and_keeps_higher_score()
+    public void MergeEvidence_deduplicates_chunks_and_re_normalizes_combined_scores()
     {
         var id = Guid.NewGuid();
         var doc = Guid.NewGuid();
-        var low = Hit(id, doc, 0.2);
-        var high = Hit(id, doc, 0.9);
-        var other = Hit(Guid.NewGuid(), doc, 0.5);
+        var low = Hit(id, doc, 0.2, .01);
+        var high = Hit(id, doc, 0.9, .08);
+        var other = Hit(Guid.NewGuid(), doc, 0.5, .04);
 
         var result = RagWorkflowPolicy.MergeEvidence([low], [high, other], 10);
 
         Assert.Equal(2, result.Count);
-        Assert.Equal(0.9, result[0].Score);
+        Assert.Equal(id, result[0].PointId);
+        Assert.Equal(1d, result[0].Score, 6);
         Assert.Contains(result, x => x.PointId == other.PointId);
+    }
+
+    [Fact]
+    public void MergeEvidence_uses_score_fallback_for_legacy_hits_without_fusion_score()
+    {
+        var high = Hit(Guid.NewGuid(), Guid.NewGuid(), 0.9, null);
+        var low = Hit(Guid.NewGuid(), Guid.NewGuid(), 0.2, null);
+
+        var result = RagWorkflowPolicy.MergeEvidence([low], [high], 10);
+
+        Assert.Equal(high.PointId, result[0].PointId);
     }
 
     [Fact]
@@ -74,6 +86,6 @@ public sealed class RagWorkflowPolicyTests
         Assert.Equal(["original", "one", "two"], result);
     }
 
-    private static SearchHit Hit(Guid pointId, Guid documentId, double score)
-        => new(pointId, documentId, "doc.md", 0, "evidence", score, "/file");
+    private static SearchHit Hit(Guid pointId, Guid documentId, double score, double? fusion)
+        => new(pointId, documentId, "doc.md", 0, "evidence", score, "/file", FusionScore: fusion);
 }

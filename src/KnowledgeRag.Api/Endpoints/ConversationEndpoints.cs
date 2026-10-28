@@ -16,13 +16,32 @@ public static class ConversationEndpoints
         group.MapPost("", async (CreateConversationRequest request, ClaimsPrincipal principal, ConversationService service, CancellationToken ct) =>
         {
             var conversation = await service.CreateAsync(HttpActorContext.From(principal), request, ct);
+            return Results.Ok(new { conversation.Id, conversation.KnowledgeBaseId, conversation.Title, conversation.CreatedAt, conversation.UpdatedAt, Archived = false });
+        });
+
+        group.MapGet("", async (Guid? knowledgeBaseId, bool? archived, ClaimsPrincipal principal, ConversationService service, CancellationToken ct) =>
+        {
+            var isArchived = archived ?? false;
+            var rows = await service.ListAsync(HttpActorContext.From(principal), knowledgeBaseId, isArchived, ct);
+            return Results.Ok(rows.Select(x => new { x.Id, x.KnowledgeBaseId, x.Title, x.CreatedAt, x.UpdatedAt, Archived = isArchived }));
+        });
+
+        group.MapPatch("/{conversationId:guid}", async (Guid conversationId, RenameConversationRequest request, ClaimsPrincipal principal, ConversationService service, CancellationToken ct) =>
+        {
+            var conversation = await service.RenameAsync(HttpActorContext.From(principal), conversationId, request.Title, ct);
             return Results.Ok(new { conversation.Id, conversation.KnowledgeBaseId, conversation.Title, conversation.CreatedAt, conversation.UpdatedAt });
         });
 
-        group.MapGet("", async (Guid? knowledgeBaseId, ClaimsPrincipal principal, ConversationService service, CancellationToken ct) =>
+        group.MapPost("/{conversationId:guid}/archive", async (Guid conversationId, ClaimsPrincipal principal, ConversationService service, CancellationToken ct) =>
         {
-            var rows = await service.ListAsync(HttpActorContext.From(principal), knowledgeBaseId, ct);
-            return Results.Ok(rows.Select(x => new { x.Id, x.KnowledgeBaseId, x.Title, x.CreatedAt, x.UpdatedAt }));
+            await service.SetArchivedAsync(HttpActorContext.From(principal), conversationId, true, ct);
+            return Results.NoContent();
+        });
+
+        group.MapDelete("/{conversationId:guid}/archive", async (Guid conversationId, ClaimsPrincipal principal, ConversationService service, CancellationToken ct) =>
+        {
+            await service.SetArchivedAsync(HttpActorContext.From(principal), conversationId, false, ct);
+            return Results.NoContent();
         });
 
         group.MapGet("/{conversationId:guid}/messages", async (Guid conversationId, ClaimsPrincipal principal, ConversationService service, CancellationToken ct) =>
@@ -31,8 +50,23 @@ public static class ConversationEndpoints
             return Results.Ok(messages.Select(x => new { x.Id, x.Role, x.Content, SourcesJson = NormalizeSourcesJson(x.SourcesJson), x.CreatedAt }));
         });
 
+        group.MapGet("/{conversationId:guid}/messages/page", async (Guid conversationId, DateTimeOffset? before, int? limit, ClaimsPrincipal principal, ConversationService service, CancellationToken ct) =>
+        {
+            var page = await service.GetMessagePageAsync(HttpActorContext.From(principal), conversationId, before, limit ?? 50, ct);
+            return Results.Ok(page with
+            {
+                Messages = page.Messages.Select(x => x with { SourcesJson = NormalizeSourcesJson(x.SourcesJson) }).ToList()
+            });
+        });
+
         group.MapPost("/{conversationId:guid}/messages", async (Guid conversationId, SendMessageRequest request, ClaimsPrincipal principal, ConversationService service, CancellationToken ct) =>
             Results.Ok(await service.SendAsync(HttpActorContext.From(principal), conversationId, request.Message, ct)));
+
+        group.MapPost("/{conversationId:guid}/messages/{messageId:guid}/feedback", async (Guid conversationId, Guid messageId, ConversationFeedbackRequest request, ClaimsPrincipal principal, ConversationService service, CancellationToken ct) =>
+        {
+            await service.SaveFeedbackAsync(HttpActorContext.From(principal), conversationId, messageId, request.Rating, ct);
+            return Results.NoContent();
+        });
 
         group.MapPost("/{conversationId:guid}/messages/stream", async (Guid conversationId, SendMessageRequest request, ClaimsPrincipal principal, ConversationService service, HttpResponse response, CancellationToken ct) =>
         {

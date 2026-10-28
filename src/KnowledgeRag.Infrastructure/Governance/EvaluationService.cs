@@ -18,7 +18,7 @@ public sealed class EvaluationService(
     TenantAccessService tenantAccess,
     WebhookAutomationService webhooks)
 {
-    private const string EvaluatorVersion = "citation-aware-v2";
+    private const string EvaluatorVersion = "retrieval-citation-v3";
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
 
     public async Task<EvaluationRunEntity> RunAsync(ActorContext actor, Guid tenantId, Guid datasetId, CancellationToken ct = default)
@@ -32,8 +32,8 @@ public sealed class EvaluationService(
         var cases = caseRows.OrderBy(x => x.CreatedAt).ToList();
         if (cases.Count == 0) throw new InvalidOperationException("Evaluation Dataset 至少需要一个测试用例。");
 
-        // Resolve once and persist only behavior/config identifiers. Managed prompt bodies are
-        // intentionally excluded from Evaluation results so the report cannot become a prompt leak.
+        // Resolve once. RagRuntimeProfileService is scoped and caches this immutable snapshot, so
+        // the actual Agent execution below observes the same models/prompts/reviewer policy.
         var profile = await runtimeProfiles.ResolveAsync(dataset.KnowledgeBaseId, ct);
         var profileSnapshot = new EvaluationProfileSnapshot(
             profile.EnablePlanner,
@@ -94,7 +94,7 @@ public sealed class EvaluationService(
             run.GroundednessRate = summary.GroundednessRate;
             run.AverageLatencyMs = summary.AverageLatencyMs;
             // Preserve the existing column's meaning for API compatibility: retrieved evidence,
-            // while the v2 JSON separately exposes actually cited-source averages.
+            // while the v3 JSON separately exposes cited-source and retrieval-ranking metrics.
             run.AverageSourceCount = summary.AverageRetrievedSourceCount;
             run.ResultsJson = SerializeDetails("completed", profileSnapshot, baselineSnapshot, comparison, summary, evaluated);
             run.CompletedAt = DateTimeOffset.UtcNow;
@@ -107,6 +107,10 @@ public sealed class EvaluationService(
                 run.GroundednessRate,
                 summary.CitationValidityRate,
                 summary.NoAnswerAccuracy,
+                summary.RetrievalHitRate,
+                summary.AverageRecallAtK,
+                summary.AverageMrr,
+                summary.AverageNdcg,
                 run.AverageLatencyMs,
                 baselineRunId = baselineSnapshot?.RunId,
                 passRateRegression = comparison?.PassRateRegression,
@@ -165,6 +169,14 @@ public sealed class EvaluationService(
             ? 1
             : noAnswerCases.Count(x => x.Assessment.NoAnswerPass) / (double)noAnswerCases.Count;
 
+        var retrievalApplicable = evaluated.Where(x => x.Assessment.Retrieval.Applicable).ToList();
+        var retrievalHitRate = retrievalApplicable.Count == 0
+            ? 1
+            : retrievalApplicable.Count(x => x.Assessment.Retrieval.Hit) / (double)retrievalApplicable.Count;
+        var averageRecallAtK = retrievalApplicable.Count == 0 ? 1 : retrievalApplicable.Average(x => x.Assessment.Retrieval.RecallAtK);
+        var averageMrr = retrievalApplicable.Count == 0 ? 1 : retrievalApplicable.Average(x => x.Assessment.Retrieval.Mrr);
+        var averageNdcg = retrievalApplicable.Count == 0 ? 1 : retrievalApplicable.Average(x => x.Assessment.Retrieval.Ndcg);
+
         return new EvaluationSummary(
             totalCaseCount,
             evaluated.Count,
@@ -173,6 +185,10 @@ public sealed class EvaluationService(
             groundednessRate,
             citationValidityRate,
             noAnswerAccuracy,
+            retrievalHitRate,
+            averageRecallAtK,
+            averageMrr,
+            averageNdcg,
             evaluated.Count == 0 ? 0 : evaluated.Average(x => (double)x.LatencyMs),
             evaluated.Count == 0 ? 0 : evaluated.Average(x => (double)x.Assessment.RetrievedSourceCount),
             evaluated.Count == 0 ? 0 : evaluated.Average(x => (double)x.Assessment.CitedSources.Count),
@@ -189,7 +205,11 @@ public sealed class EvaluationService(
                 group.Count(x => x.Assessment.Passed),
                 group.Count() == 0 ? 0 : group.Count(x => x.Assessment.Passed) / (double)group.Count(),
                 group.Count(x => x.Assessment.GroundingPass),
-                group.Count() == 0 ? 0 : group.Count(x => x.Assessment.GroundingPass) / (double)group.Count()))
+                group.Count() == 0 ? 0 : group.Count(x => x.Assessment.GroundingPass) / (double)group.Count(),
+                group.Count(x => x.Assessment.Retrieval.Applicable),
+                group.Any(x => x.Assessment.Retrieval.Applicable)
+                    ? group.Where(x => x.Assessment.Retrieval.Applicable).Average(x => x.Assessment.Retrieval.RecallAtK)
+                    : 1))
             .ToList();
 
     private static EvaluationBaselineComparison? CompareWithBaseline(EvaluationBaselineSnapshot? baseline, EvaluationSummary summary)
@@ -214,19 +234,20 @@ public sealed class EvaluationService(
         EvaluationSummary summary,
         IReadOnlyList<EvaluatedCase> evaluated)
     {
-        var details = new EvaluationRunDetailsV2(
-            2,
+        var details = new EvaluationRunDetailsV3(
+            3,
             EvaluatorVersion,
             status,
             profile,
             baseline,
             comparison,
             summary,
-            evaluated.Select(x => new EvaluationCaseResultV2(
+            evaluated.Select(x => new EvaluationCaseResultV3(
                 x.Assessment.CaseId,
                 x.Assessment.Category,
                 x.Assessment.Query,
                 x.Assessment.ExpectedAnswerContains,
+                x.Assessment.ExpectedSources,
                 x.Assessment.RequiresKnowledge,
                 x.Assessment.Answer,
                 x.Assessment.RetrievedSourceCount,
@@ -234,12 +255,22 @@ public sealed class EvaluationService(
                 x.Assessment.CitationCount,
                 x.Assessment.InvalidCitationCount,
                 x.LatencyMs,
-                new EvaluationChecksV2(
+                new EvaluationRetrievalResultV3(
+                    x.Assessment.Retrieval.Applicable,
+                    x.Assessment.Retrieval.ExpectedSourceCount,
+                    x.Assessment.Retrieval.MatchedSourceCount,
+                    x.Assessment.Retrieval.Hit,
+                    x.Assessment.Retrieval.RecallAtK,
+                    x.Assessment.Retrieval.Mrr,
+                    x.Assessment.Retrieval.Ndcg,
+                    x.Assessment.Retrieval.Passed),
+                new EvaluationChecksV3(
                     x.Assessment.NonEmpty,
                     x.Assessment.ExpectedPass,
                     x.Assessment.CitationPass,
                     x.Assessment.GroundingPass,
                     x.Assessment.NoAnswerPass,
+                    x.Assessment.Retrieval.Passed,
                     x.Assessment.InsufficientEvidence),
                 x.Assessment.Passed,
                 x.Assessment.CitedSources.Select(source => new EvaluationSourceRef(
@@ -292,6 +323,10 @@ public sealed class EvaluationService(
         double GroundednessRate,
         double CitationValidityRate,
         double NoAnswerAccuracy,
+        double RetrievalHitRate,
+        double AverageRecallAtK,
+        double AverageMrr,
+        double AverageNdcg,
         double AverageLatencyMs,
         double AverageRetrievedSourceCount,
         double AverageCitedSourceCount,
@@ -303,9 +338,11 @@ public sealed class EvaluationService(
         int PassedCount,
         double PassRate,
         int GroundedCount,
-        double GroundednessRate);
+        double GroundednessRate,
+        int RetrievalCaseCount,
+        double AverageRecallAtK);
 
-    private sealed record EvaluationRunDetailsV2(
+    private sealed record EvaluationRunDetailsV3(
         int SchemaVersion,
         string EvaluatorVersion,
         string Status,
@@ -313,13 +350,14 @@ public sealed class EvaluationService(
         EvaluationBaselineSnapshot? Baseline,
         EvaluationBaselineComparison? Comparison,
         EvaluationSummary Summary,
-        IReadOnlyList<EvaluationCaseResultV2> Cases);
+        IReadOnlyList<EvaluationCaseResultV3> Cases);
 
-    private sealed record EvaluationCaseResultV2(
+    private sealed record EvaluationCaseResultV3(
         Guid CaseId,
         string Category,
         string Query,
         string? ExpectedAnswerContains,
+        IReadOnlyList<EvaluationExpectedSource> ExpectedSources,
         bool RequiresKnowledge,
         string Answer,
         int RetrievedSourceCount,
@@ -327,16 +365,28 @@ public sealed class EvaluationService(
         int CitationCount,
         int InvalidCitationCount,
         long LatencyMs,
-        EvaluationChecksV2 Checks,
+        EvaluationRetrievalResultV3 Retrieval,
+        EvaluationChecksV3 Checks,
         bool Passed,
         IReadOnlyList<EvaluationSourceRef> CitedSources);
 
-    private sealed record EvaluationChecksV2(
+    private sealed record EvaluationRetrievalResultV3(
+        bool Applicable,
+        int ExpectedSourceCount,
+        int MatchedSourceCount,
+        bool Hit,
+        double RecallAtK,
+        double Mrr,
+        double Ndcg,
+        bool Passed);
+
+    private sealed record EvaluationChecksV3(
         bool NonEmpty,
-        bool ExpectedPass,
-        bool CitationPass,
-        bool GroundingPass,
-        bool NoAnswerPass,
+        bool Expected,
+        bool Citation,
+        bool Grounding,
+        bool NoAnswer,
+        bool Retrieval,
         bool InsufficientEvidence);
 
     private sealed record EvaluationSourceRef(Guid DocumentId, string FileName, int ChunkIndex, int? PageNumber);

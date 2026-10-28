@@ -15,6 +15,8 @@ public sealed class RagOptions
     public int EmbeddingBatchSize { get; set; } = 16;
     public int UpsertBatchSize { get; set; } = 32;
     public int MaxUploadMegabytes { get; set; } = 30;
+    public int MaxEvidenceTokens { get; set; } = 6000;
+    public int MaxEvidenceTokensPerDocument { get; set; } = 2200;
 
     // Agent workflow controls.
     public bool EnableAgentWorkflow { get; set; } = true;
