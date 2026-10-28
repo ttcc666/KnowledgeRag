@@ -18,11 +18,7 @@ public sealed record ChatSource(
     double? FusionScore = null,
     double? RerankScore = null);
 public sealed record ChatResponse(Guid ConversationId, string Answer, IReadOnlyList<ChatSource> Sources);
-public sealed record AgentTurnResult(
-    string Answer,
-    string SessionJson,
-    IReadOnlyList<SearchHit> Sources,
-    bool RequiresKnowledge = true);
+public sealed record AgentTurnResult(string Answer, string SessionJson, IReadOnlyList<SearchHit> Sources);
 public sealed record ChatMessageItem(
     Guid Id,
     string Role,
