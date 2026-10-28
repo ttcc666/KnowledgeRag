@@ -22,11 +22,12 @@
 
 ### Changed
 
-- 暂无。
+- 成本估算中的模型价格查询改为跨数据库兼容实现：Tenant / Model / Active 条件仍由数据库过滤，`UpdatedAt` 的最新记录选择改为 materialize 后在内存排序，确保 SQLite 与 PostgreSQL 行为一致。
 
 ### Fixed
 
-- 暂无。
+- 修复 SQLite 下 `RagRuntimeProfileService.EstimateCostAsync` 对 `DateTimeOffset UpdatedAt` 执行数据库端 `ORDER BY` 时抛出 `NotSupportedException`，导致 RAG 回答完成后在持久化 Run Trace / Cost 阶段返回 HTTP 500 的问题。
+- 增加 SQLite 集成回归，直接验证配置模型价格后的成本估算路径可正常执行并使用正确价格。
 
 ---
 

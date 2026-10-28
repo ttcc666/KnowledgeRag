@@ -68,10 +68,13 @@ public sealed class RagRuntimeProfileService(
 
     public async Task<decimal> EstimateCostAsync(Guid tenantId, string model, int inputTokens, int outputTokens, CancellationToken ct = default)
     {
-        var price = await db.Set<ModelPriceEntity>().AsNoTracking()
+        // SQLite cannot translate DateTimeOffset ORDER BY. Keep provider-neutral filtering in SQL,
+        // then select the newest matching price in memory. PostgreSQL follows the same path so
+        // cost selection semantics stay consistent across supported database providers.
+        var prices = await db.Set<ModelPriceEntity>().AsNoTracking()
             .Where(x => x.TenantId == tenantId && x.Model == model && x.IsActive)
-            .OrderByDescending(x => x.UpdatedAt)
-            .FirstOrDefaultAsync(ct);
+            .ToListAsync(ct);
+        var price = prices.OrderByDescending(x => x.UpdatedAt).FirstOrDefault();
         var inputRate = price?.InputCostPerMillionTokens ?? _ai.ChatInputCostPerMillionTokens;
         var outputRate = price?.OutputCostPerMillionTokens ?? _ai.ChatOutputCostPerMillionTokens;
         return inputTokens / 1_000_000m * inputRate + outputTokens / 1_000_000m * outputRate;
