@@ -1,0 +1,38 @@
+name: lockgen-assistant-markdown
+
+on:
+  push:
+    branches:
+      - fix/assistant-ui-markdown-webhook-timeout
+    paths:
+      - src/KnowledgeRag.Admin/package.json
+      - .github/workflows/lockgen-assistant-markdown.yml
+
+permissions:
+  contents: write
+
+jobs:
+  lockfile:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/assistant-ui-markdown-webhook-timeout
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/KnowledgeRag.Admin/package-lock.json
+      - name: Regenerate package lock
+        working-directory: src/KnowledgeRag.Admin
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Commit lockfile
+        run: |
+          if git diff --quiet -- src/KnowledgeRag.Admin/package-lock.json; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/KnowledgeRag.Admin/package-lock.json
+          git commit -m "chore(frontend): update markdown dependency lockfile"
+          git push origin HEAD:fix/assistant-ui-markdown-webhook-timeout
