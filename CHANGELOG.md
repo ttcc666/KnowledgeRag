@@ -18,6 +18,8 @@
 
 ### Added
 
+- 新增 **Tenant AI Provider Control Plane**：租户可管理 OpenAI-compatible Provider Connection、加密 Credential、Chat / Embedding / Rerank Model Deployment 与租户默认模型；Chat/Planner/Answer/Reviewer 运行时按租户解析 Provider，未配置租户 Provider 时保持平台级 AI fallback。
+- 新增租户 AI Provider 管理界面与连接验证；Embedding Deployment 本阶段仅作为后续版本化 Reindex 的目标配置，现有 active vector space 不会因租户默认值变化而直接切换。
 - 新增 **Final Answer Citation Gate**：Agent / Reviewer 完成后、SSE 与持久化之前统一执行确定性 Citation normalize/validation；非法 Evidence ID、知识型无有效引用回答均 fail-closed，只向前端暴露答案实际引用的可信 Sources。
 - 新增 **Evidence Context Budget**：RAG 增加总 Evidence token budget 与单文档 token budget，按最终排序确定性截断上下文，限制 Multi-query / Repair 造成的上下文与成本膨胀。
 - 新增 **Evaluation v3 Retrieval Metrics**：Case 可选标注 expected source（文件名 + 可选 chunk），确定性计算 Hit Rate、Recall@K、MRR、nDCG；`ResultsJson` 升级为 `schemaVersion=3` / `evaluatorVersion=retrieval-citation-v3`，并将检索指标写入 Case、分类汇总和 `evaluation.completed` webhook 元数据。
@@ -44,6 +46,7 @@
 
 ### Changed
 
+- Tenant-managed AI Provider Base URL 强制使用公网 HTTPS，并复用无 ambient proxy、无 redirect、DNS 公网地址校验与 ConnectCallback pinning 的 SSRF 安全连接策略；Provider Credential 使用独立 purpose 的 AES-GCM 加密且 API 永不返回明文。
 - Chat 主界面继续使用 assistant-ui 官方 registry `Thread` / `ThreadList` / `MarkdownText` / `Sources`；TanStack Query + SSE 作为 External Store 数据适配层，安全的 Agent Workflow 运行状态现在属于当前 assistant turn 并在消息流内呈现，深度 Evidence Panel 仍保持独立侧栏，不展示 Chain of Thought。
 - Chat assistant answer 改用 assistant-ui 官方 `MarkdownTextPrimitive` + GFM 渲染，不再维护手写 Markdown parser；Source Evidence Panel 使用同一标准 Markdown 语义渲染标题、列表、代码块、表格等，同时保持普通链接/远程图片不可交互或加载。
 - RAG Profile 在同一 scoped request 内只解析一次 execution snapshot；Budget Reservation、Agent 执行与 Evaluation 使用一致的模型、Prompt、检索和 Reviewer 配置，避免并发配置修改造成预留与实际执行快照不一致。
