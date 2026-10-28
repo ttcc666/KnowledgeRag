@@ -75,6 +75,8 @@
 
 ### Fixed
 
+- 修复 correctness-first Answer / Citation Gate 缓冲期间向 assistant-ui Thread 合成空的 running assistant turn，导致长时间只显示孤立 `●` working indicator；现在 pending 阶段仅保留用户消息与外部 Workflow 状态，只有可见答案文本到达后才创建 assistant message。
+- 优化 Chat 工作区视觉层级：顶部会话工具栏并入 Thread workspace，Agent Workflow 默认保持紧凑且详情以 overlay 展开，官方 ThreadList 侧栏按推荐的 256px 宽度呈现，Source Panel 与主阅读区使用统一 header/边框层级，同时仅通过官方 Thread shell 变量适度放宽阅读宽度。
 - Webhook 原生 HTTP 投递超过配置的 8 秒超时时，不再以未分类 `TaskCanceledException` 记录；现在保存明确的 Request Timeout 状态并抛出可重试 `WebhookDeliveryTimeoutException` 供 CAP 重试，手动 Webhook Test API 返回 504。
 - 修复 Chat 受限 Markdown renderer 对缩进列表、连续有序列表和 inline code 处理不完整，导致回答中出现原始 `-` / 反引号、段落空隙过大且执行过程卡片与正文阅读宽度不一致的问题；现在正文、引用、执行过程和反馈栏统一在同一阅读宽度内，同时继续禁止 raw HTML / 任意链接并保留可信 Citation 边界。
 - 修复 assistant-ui Thread List / 分页切换的瞬态状态可能让 Chat runtime 收到尚未出现在 regular/archived 列表中的 `threadId` 或异常消息项，进而在构建 Source 索引时访问 `undefined.id` 并使页面崩溃的问题；Chat 现在只暴露已注册 thread，并在分页消息边界过滤空值与畸形项。

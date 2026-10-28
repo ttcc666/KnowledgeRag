@@ -109,7 +109,9 @@ test('official assistant-ui Thread renders chat, sources, feedback and Knowledge
 
   const workflowToggle = page.getByRole('button', { name: /Agent workflow complete/ })
   await expect(workflowToggle).toBeVisible()
+  await expect(page.getByTestId('run-status-details')).toHaveCount(0)
   await workflowToggle.click()
+  await expect(page.getByTestId('run-status-details')).toBeVisible()
   await expect(page.getByText('问题分析完成')).toBeVisible()
   await expect(page.getByText('检索、融合与重排完成')).toBeVisible()
   await expect(page.getByText('证据审核通过')).toBeVisible()
