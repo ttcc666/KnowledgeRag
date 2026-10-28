@@ -24,6 +24,16 @@ public sealed class WebhookUrlPolicyTests
         Assert.Equal(Uri.UriSchemeHttps, uri.Scheme);
     }
 
+    [Fact]
+    public void CreateHttpHandler_DisablesAmbientProxy_AndKeepsSsrfConnectionCallback()
+    {
+        using var handler = WebhookSafeConnection.CreateHttpHandler();
+
+        Assert.False(handler.UseProxy);
+        Assert.False(handler.AllowAutoRedirect);
+        Assert.NotNull(handler.ConnectCallback);
+    }
+
     [Theory]
     [InlineData("8.8.8.8", true)]
     [InlineData("1.1.1.1", true)]
