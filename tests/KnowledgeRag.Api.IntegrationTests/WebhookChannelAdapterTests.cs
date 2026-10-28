@@ -11,25 +11,76 @@ public sealed class WebhookChannelAdapterTests
             Guid.Parse("22222222-2222-2222-2222-222222222222"),
             Guid.Parse("33333333-3333-3333-3333-333333333333"),
             "rag.run.completed",
-            "{\"id\":\"5b88e21c-668d-44f0-9d72-624b3cd50ce8\",\"status\":\"completed\",\"sourceCount\":6,\"latencyMs\":36065,\"estimatedInputTokens\":5985,\"estimatedOutputTokens\":637,\"estimatedCostUsd\":0.003308,\"answerModel\":\"deepseek-ai/DeepSeek-V3\",\"agentMode\":\"specialists\"}",
+            "{\"id\":\"5b88e21c-668d-44f0-9d72-624b3cd50ce8\",\"conversationId\":\"7bbc659f-53ae-470e-bcd2-7c79cf0a4ce1\",\"status\":\"completed\",\"sourceCount\":6,\"latencyMs\":36065,\"estimatedInputTokens\":5985,\"estimatedOutputTokens\":637,\"estimatedCostUsd\":0.003308,\"answerModel\":\"deepseek-ai/DeepSeek-V3\",\"agentMode\":\"specialists\"}",
             DateTimeOffset.Parse("2026-10-28T12:00:00Z"));
 
-    [Theory]
-    [InlineData("slack", "text")]
-    [InlineData("discord", "content")]
-    [InlineData("teams", "attachments")]
-    [InlineData("feishu", "msg_type")]
-    [InlineData("dingtalk", "msgtype")]
-    [InlineData("wecom", "msgtype")]
-    public async Task ProviderAdapters_RenderPlatformSpecificPayloads(string provider, string expectedProperty)
+    [Fact]
+    public async Task SlackAdapter_UsesBlockKit()
     {
-        var delivery = CreateDelivery();
-        using var request = WebhookChannelAdapterRegistry.Get(provider).CreateRequest(
-            new Uri("https://example.com/hook"), delivery, "{\"id\":\"event-1\"}", "KnowledgeRag test message", null);
-        Assert.Equal(HttpMethod.Post, request.Method);
-        Assert.Equal("application/json", request.Content?.Headers.ContentType?.MediaType);
+        using var request = CreateProviderRequest("slack");
         using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
-        Assert.True(body.RootElement.TryGetProperty(expectedProperty, out _));
+        var blocks = body.RootElement.GetProperty("blocks");
+
+        Assert.Equal("header", blocks[0].GetProperty("type").GetString());
+        Assert.Contains(blocks.EnumerateArray(), block => block.GetProperty("type").GetString() == "section" && block.TryGetProperty("fields", out _));
+        Assert.True(body.RootElement.TryGetProperty("text", out _));
+    }
+
+    [Fact]
+    public async Task DiscordAdapter_UsesEmbedAndDisablesMentions()
+    {
+        using var request = CreateProviderRequest("discord");
+        using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+
+        var embed = body.RootElement.GetProperty("embeds")[0];
+        Assert.Contains("RAG 问答运行完成", embed.GetProperty("title").GetString());
+        Assert.True(embed.GetProperty("fields").GetArrayLength() >= 4);
+        Assert.Empty(body.RootElement.GetProperty("allowed_mentions").GetProperty("parse").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task TeamsAdapter_UsesAdaptiveCardWithFactSet()
+    {
+        using var request = CreateProviderRequest("teams");
+        using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+
+        var attachment = body.RootElement.GetProperty("attachments")[0];
+        Assert.Equal("application/vnd.microsoft.card.adaptive", attachment.GetProperty("contentType").GetString());
+        var cardBody = attachment.GetProperty("content").GetProperty("body");
+        Assert.Contains(cardBody.EnumerateArray(), element => element.GetProperty("type").GetString() == "FactSet");
+    }
+
+    [Fact]
+    public async Task FeishuAdapter_UsesInteractiveCard()
+    {
+        using var request = CreateProviderRequest("feishu");
+        using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+
+        Assert.Equal("interactive", body.RootElement.GetProperty("msg_type").GetString());
+        var card = body.RootElement.GetProperty("card");
+        Assert.Equal("turquoise", card.GetProperty("header").GetProperty("template").GetString());
+        Assert.Contains("RAG 问答运行完成", card.GetProperty("header").GetProperty("title").GetProperty("content").GetString());
+        Assert.Contains(card.GetProperty("elements").EnumerateArray(), element => element.GetProperty("tag").GetString() == "div");
+    }
+
+    [Fact]
+    public async Task DingTalkAdapter_UsesMarkdownMessage()
+    {
+        using var request = CreateProviderRequest("dingtalk");
+        using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+
+        Assert.Equal("markdown", body.RootElement.GetProperty("msgtype").GetString());
+        Assert.Contains("响应耗时", body.RootElement.GetProperty("markdown").GetProperty("text").GetString());
+    }
+
+    [Fact]
+    public async Task WeComAdapter_UsesMarkdownMessage()
+    {
+        using var request = CreateProviderRequest("wecom");
+        using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+
+        Assert.Equal("markdown", body.RootElement.GetProperty("msgtype").GetString());
+        Assert.Contains("引用召回", body.RootElement.GetProperty("markdown").GetProperty("content").GetString());
     }
 
     [Fact]
@@ -37,12 +88,12 @@ public sealed class WebhookChannelAdapterTests
     {
         var (_, message) = WebhookChannelMessageFormatter.Format(CreateDelivery());
 
-        Assert.Contains("RAG 运行完成", message);
-        Assert.Contains("引用来源：6 个", message);
-        Assert.Contains("耗时：36.1 秒", message);
-        Assert.Contains("Token：5,985 输入 / 637 输出", message);
-        Assert.Contains("估算成本：$0.003308", message);
-        Assert.Contains("回答模型：deepseek-ai/DeepSeek-V3", message);
+        Assert.Contains("RAG 问答运行完成", message);
+        Assert.Contains("引用召回：6 篇文档", message);
+        Assert.Contains("响应耗时：36.1 秒", message);
+        Assert.Contains("Token 消耗：入 5,985 / 出 637", message);
+        Assert.Contains("估算费用：$0.003308 USD", message);
+        Assert.Contains("问答模型：deepseek-ai/DeepSeek-V3", message);
         Assert.Contains("Run ID：5b88e21c", message);
         Assert.DoesNotContain("{", message);
         Assert.DoesNotContain("\"sourceCount\"", message);
@@ -59,9 +110,9 @@ public sealed class WebhookChannelAdapterTests
 
         var (_, message) = WebhookChannelMessageFormatter.Format(delivery);
 
-        Assert.Contains("KnowledgeRag 通知测试", message);
+        Assert.Contains("KnowledgeRag 连通性测试", message);
         Assert.Contains("KnowledgeRag webhook test", message);
-        Assert.Contains("2026-10-28 08:20:40 UTC", message);
+        Assert.Contains("Delivery ID：44444444", message);
         Assert.DoesNotContain("\\u002B", message);
         Assert.DoesNotContain("{", message);
     }
@@ -76,13 +127,13 @@ public sealed class WebhookChannelAdapterTests
 
         var (_, message) = WebhookChannelMessageFormatter.Format(delivery);
 
-        Assert.Contains("Evaluation 完成（检测到回归）", message);
+        Assert.Contains("RAG Evaluation 完成（检测到回归）", message);
         Assert.Contains("通过率：90.0%", message);
         Assert.Contains("Groundedness：95.0%", message);
         Assert.Contains("Citation validity：100.0%", message);
         Assert.Contains("No-answer accuracy：80.0%", message);
         Assert.Contains("平均耗时：1.8 秒", message);
-        Assert.Contains("回归项：通过率、延迟", message);
+        Assert.Contains("检测到回归：通过率、延迟", message);
         Assert.DoesNotContain("{", message);
     }
 
@@ -120,5 +171,12 @@ public sealed class WebhookChannelAdapterTests
         Assert.Equal("custom", WebhookChannelAdapterRegistry.NormalizeProvider(null));
         Assert.Equal("slack", WebhookChannelAdapterRegistry.NormalizeProvider(" Slack "));
         Assert.Throws<InvalidOperationException>(() => WebhookChannelAdapterRegistry.NormalizeProvider("not-a-provider"));
+    }
+
+    private static HttpRequestMessage CreateProviderRequest(string provider)
+    {
+        var delivery = CreateDelivery();
+        return WebhookChannelAdapterRegistry.Get(provider).CreateRequest(
+            new Uri("https://example.com/hook"), delivery, "{\"id\":\"event-1\"}", "fallback", null);
     }
 }
