@@ -58,7 +58,7 @@ test('governance center exposes evaluation, profile, trace, cost, audit, automat
   await expect(page.getByText('$0.1245').last()).toBeVisible()
 
   await page.getByRole('button', { name: 'Audit Log' }).click()
-  await expect(page.getByText('knowledge-base')).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'knowledge-base', exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: 'Automation' }).click()
   await expect(page.getByText('https://example.com/hook')).toBeVisible()
