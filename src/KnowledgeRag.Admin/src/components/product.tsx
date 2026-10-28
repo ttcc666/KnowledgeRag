@@ -15,11 +15,13 @@ export function StatusBadge({ status }: { status: DocumentStatus }) {
   const map: Record<DocumentStatus, { label: string; variant: 'secondary' | 'info' | 'success' | 'destructive' | 'outline' }> = {
     Queued: { label: 'Queued', variant: 'secondary' },
     Processing: { label: 'Processing', variant: 'info' },
+    Reindexing: { label: 'Reindexing', variant: 'info' },
     Ready: { label: 'Ready', variant: 'success' },
     Failed: { label: 'Failed', variant: 'destructive' },
     Cancelled: { label: 'Cancelled', variant: 'outline' },
   }
-  return <Badge variant={map[status].variant}>{status === 'Processing' && <span className='mr-1.5'><LiveDot /></span>}{map[status].label}</Badge>
+  const live = status === 'Processing' || status === 'Reindexing'
+  return <Badge variant={map[status].variant}>{live && <span className='mr-1.5'><LiveDot /></span>}{map[status].label}</Badge>
 }
 
 export function ProcessingBar({ progress, stage, chunkCount }: { progress: number; stage?: string; chunkCount?: number }) {
