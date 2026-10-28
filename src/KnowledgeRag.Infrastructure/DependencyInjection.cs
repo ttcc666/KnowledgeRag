@@ -36,6 +36,7 @@ public static class DependencyInjection
         services.AddDocumentModule(configuration);
         services.AddConversationModule();
         services.AddMessagingModule(configuration);
+        services.AddSingleton<WebhookSecretProtector>();
         services.AddScoped<RagRuntimeProfileService>();
         services.AddScoped<GovernanceService>();
         services.AddScoped<EvaluationService>();
