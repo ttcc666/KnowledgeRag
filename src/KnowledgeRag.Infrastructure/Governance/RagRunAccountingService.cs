@@ -105,7 +105,10 @@ public sealed class RagRunAccountingService(
             }
             catch (Exception ex) when (attempt < 2 && IsSerializationConflict(ex))
             {
-                db.ChangeTracker.Clear();
+                // Only detach accounting rows. Clearing the whole request DbContext would also
+                // detach the Conversation that must be updated after the Agent finishes.
+                foreach (var entry in db.ChangeTracker.Entries<RagRunEntity>().ToList())
+                    entry.State = EntityState.Detached;
                 await Task.Delay(25 * (attempt + 1), ct);
             }
         }
@@ -161,15 +164,37 @@ public sealed class RagRunAccountingService(
 
     private async Task<IReadOnlyList<AiUsageLineItem>> PriceAsync(Guid tenantId, IReadOnlyList<AiUsageEstimate> estimates, CancellationToken ct)
     {
+        var explicitPrices = await db.ModelPrices.AsNoTracking()
+            .Where(x => x.TenantId == tenantId && x.IsActive)
+            .ToListAsync(ct);
         var result = new List<AiUsageLineItem>(estimates.Count);
+
         foreach (var estimate in estimates)
         {
-            var cost = await runtimeProfiles.EstimateCostAsync(
-                tenantId,
-                estimate.Model,
-                estimate.InputTokens,
-                estimate.OutputTokens,
-                ct);
+            decimal cost;
+            if (string.Equals(estimate.Operation, "embedding", StringComparison.OrdinalIgnoreCase))
+            {
+                // Chat pricing is not a safe fallback for embedding models. Embedding cost is
+                // zero until the tenant explicitly configures that model in Model Prices.
+                var price = explicitPrices
+                    .Where(x => string.Equals(x.Model, estimate.Model, StringComparison.Ordinal))
+                    .OrderByDescending(x => x.UpdatedAt)
+                    .FirstOrDefault();
+                cost = price is null
+                    ? 0
+                    : estimate.InputTokens / 1_000_000m * price.InputCostPerMillionTokens +
+                      estimate.OutputTokens / 1_000_000m * price.OutputCostPerMillionTokens;
+            }
+            else
+            {
+                cost = await runtimeProfiles.EstimateCostAsync(
+                    tenantId,
+                    estimate.Model,
+                    estimate.InputTokens,
+                    estimate.OutputTokens,
+                    ct);
+            }
+
             result.Add(new AiUsageLineItem(
                 estimate.Operation,
                 estimate.Model,
