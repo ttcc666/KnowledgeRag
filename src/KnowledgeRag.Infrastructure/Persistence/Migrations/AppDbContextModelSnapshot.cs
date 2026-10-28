@@ -78,6 +78,64 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                     b.ToTable("ApiKeys", (string)null);
                 });
 
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.AuditLogEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ApiKeyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DetailsJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IpAddress")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResourceId")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResourceType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("StatusCode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UserAgent")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "CreatedAt");
+
+                    b.ToTable("AuditLogs", (string)null);
+                });
+
             modelBuilder.Entity("KnowledgeRag.Domain.Entities.ChatMessageEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -246,6 +304,136 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                     b.ToTable("Documents", (string)null);
                 });
 
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.EvaluationCaseEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("DatasetId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExpectedAnswerContains")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Query")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("RequiresKnowledge")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DatasetId", "CreatedAt");
+
+                    b.ToTable("EvaluationCases", (string)null);
+                });
+
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.EvaluationDatasetEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("KnowledgeBaseId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("KnowledgeBaseId");
+
+                    b.HasIndex("TenantId", "UpdatedAt");
+
+                    b.ToTable("EvaluationDatasets", (string)null);
+                });
+
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.EvaluationRunEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("AverageLatencyMs")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("AverageSourceCount")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("CaseCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("DatasetId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("GroundednessRate")
+                        .HasColumnType("REAL");
+
+                    b.Property<Guid>("KnowledgeBaseId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("PassRate")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("PassedCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ResultsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("KnowledgeBaseId");
+
+                    b.HasIndex("DatasetId", "CreatedAt");
+
+                    b.ToTable("EvaluationRuns", (string)null);
+                });
+
             modelBuilder.Entity("KnowledgeRag.Domain.Entities.KnowledgeBaseEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -303,6 +491,236 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("KnowledgeBaseMembers", (string)null);
+                });
+
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.KnowledgeBaseRagProfileEntity", b =>
+                {
+                    b.Property<Guid>("KnowledgeBaseId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AgentMode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AnswerModel")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("DailyRunLimit")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("EnablePlanner")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("EnableReviewer")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MaxMergedEvidence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<decimal>("MonthlyBudgetUsd")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("MultiQueryTopK")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("PlannerMaxQueries")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PlannerModel")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PromptProfileId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ReviewerMaxRetries")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("ReviewerMinConfidence")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("ReviewerModel")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UpdatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("KnowledgeBaseId");
+
+                    b.ToTable("KnowledgeBaseRagProfiles", (string)null);
+                });
+
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.ModelPriceEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("InputCostPerMillionTokens")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("OutputCostPerMillionTokens")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Model")
+                        .IsUnique();
+
+                    b.ToTable("ModelPrices", (string)null);
+                });
+
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.PromptProfileEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AnswerPrompt")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("KnowledgeBaseId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PlannerPrompt")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReviewerPrompt")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UpdatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("KnowledgeBaseId", "IsActive");
+
+                    b.HasIndex("TenantId", "Name", "Version");
+
+                    b.ToTable("PromptProfiles", (string)null);
+                });
+
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.RagRunEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AgentMode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Answer")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AnswerModel")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ApiKeyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ConversationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("EstimatedCostUsd")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("EstimatedInputTokens")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("EstimatedOutputTokens")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("KnowledgeBaseId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("LatencyMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Query")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SourceCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TraceJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConversationId");
+
+                    b.HasIndex("KnowledgeBaseId", "CreatedAt");
+
+                    b.HasIndex("TenantId", "CreatedAt");
+
+                    b.ToTable("RagRuns", (string)null);
                 });
 
             modelBuilder.Entity("KnowledgeRag.Domain.Entities.RefreshTokenEntity", b =>
@@ -452,6 +870,64 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                     b.ToTable("Users", (string)null);
                 });
 
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.WebhookSubscriptionEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EventTypes")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("LastDeliveredAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("LastStatusCode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Secret")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "IsActive");
+
+                    b.ToTable("WebhookSubscriptions", (string)null);
+                });
+
             modelBuilder.Entity("KnowledgeRag.Domain.Entities.ApiKeyEntity", b =>
                 {
                     b.HasOne("KnowledgeRag.Domain.Entities.UserEntity", null)
@@ -519,6 +995,45 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.EvaluationCaseEntity", b =>
+                {
+                    b.HasOne("KnowledgeRag.Domain.Entities.EvaluationDatasetEntity", null)
+                        .WithMany()
+                        .HasForeignKey("DatasetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.EvaluationDatasetEntity", b =>
+                {
+                    b.HasOne("KnowledgeRag.Domain.Entities.KnowledgeBaseEntity", null)
+                        .WithMany()
+                        .HasForeignKey("KnowledgeBaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("KnowledgeRag.Domain.Entities.TenantEntity", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.EvaluationRunEntity", b =>
+                {
+                    b.HasOne("KnowledgeRag.Domain.Entities.EvaluationDatasetEntity", null)
+                        .WithMany()
+                        .HasForeignKey("DatasetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("KnowledgeRag.Domain.Entities.KnowledgeBaseEntity", null)
+                        .WithMany()
+                        .HasForeignKey("KnowledgeBaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("KnowledgeRag.Domain.Entities.KnowledgeBaseEntity", b =>
                 {
                     b.HasOne("KnowledgeRag.Domain.Entities.TenantEntity", null)
@@ -543,6 +1058,58 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.KnowledgeBaseRagProfileEntity", b =>
+                {
+                    b.HasOne("KnowledgeRag.Domain.Entities.KnowledgeBaseEntity", null)
+                        .WithOne()
+                        .HasForeignKey("KnowledgeRag.Domain.Entities.KnowledgeBaseRagProfileEntity", "KnowledgeBaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.ModelPriceEntity", b =>
+                {
+                    b.HasOne("KnowledgeRag.Domain.Entities.TenantEntity", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.PromptProfileEntity", b =>
+                {
+                    b.HasOne("KnowledgeRag.Domain.Entities.KnowledgeBaseEntity", null)
+                        .WithMany()
+                        .HasForeignKey("KnowledgeBaseId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("KnowledgeRag.Domain.Entities.TenantEntity", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.RagRunEntity", b =>
+                {
+                    b.HasOne("KnowledgeRag.Domain.Entities.ConversationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("KnowledgeRag.Domain.Entities.KnowledgeBaseEntity", null)
+                        .WithMany()
+                        .HasForeignKey("KnowledgeBaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("KnowledgeRag.Domain.Entities.TenantEntity", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("KnowledgeRag.Domain.Entities.RefreshTokenEntity", b =>
                 {
                     b.HasOne("KnowledgeRag.Domain.Entities.UserEntity", null)
@@ -563,6 +1130,15 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                     b.HasOne("KnowledgeRag.Domain.Entities.UserEntity", null)
                         .WithMany()
                         .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.WebhookSubscriptionEntity", b =>
+                {
+                    b.HasOne("KnowledgeRag.Domain.Entities.TenantEntity", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
