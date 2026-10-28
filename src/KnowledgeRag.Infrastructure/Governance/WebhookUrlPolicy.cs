@@ -91,6 +91,22 @@ public static class WebhookUrlPolicy
 
 public static class WebhookSafeConnection
 {
+    /// <summary>
+    /// Creates the dedicated outbound webhook handler. Ambient system/environment proxies are
+    /// deliberately disabled: when a proxy is active, SocketsHttpHandler can surface the proxy
+    /// endpoint (commonly 127.0.0.1 for local proxy tools) to ConnectCallback instead of the
+    /// webhook destination. That both causes false SSRF blocks and prevents destination DNS
+    /// validation/pinning from protecting the actual outbound connection.
+    /// </summary>
+    public static SocketsHttpHandler CreateHttpHandler()
+        => new()
+        {
+            AllowAutoRedirect = false,
+            UseProxy = false,
+            ConnectCallback = ConnectAsync,
+            PooledConnectionLifetime = TimeSpan.FromMinutes(2)
+        };
+
     public static async ValueTask<Stream> ConnectAsync(SocketsHttpConnectionContext context, CancellationToken ct)
     {
         var addresses = await WebhookUrlPolicy.ResolvePublicAddressesAsync(context.DnsEndPoint.Host, ct);
