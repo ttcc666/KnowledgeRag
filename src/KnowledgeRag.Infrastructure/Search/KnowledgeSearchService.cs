@@ -38,7 +38,11 @@ public sealed class KnowledgeSearchService(
             var finalTopK = Math.Clamp(topK ?? _options.TopK, 1, 20);
             activity?.SetTag("rag.top_k", finalTopK);
             var vector = await embeddings.GenerateAsync(query, cancellationToken);
-            var vectorTask = vectorStore.SearchAsync(vector, knowledgeBaseId, Math.Max(finalTopK, _options.VectorCandidateCount), cancellationToken);
+            var baseVectorCandidates = Math.Max(finalTopK, _options.VectorCandidateCount);
+            // Reindexing stages vectors before the DB activation boundary. Over-fetching gives the
+            // resolver room to discard staged/orphaned point ids without reducing active recall.
+            var vectorCandidateCount = Math.Clamp(baseVectorCandidates * 2, baseVectorCandidates, 1000);
+            var vectorTask = vectorStore.SearchAsync(vector, knowledgeBaseId, vectorCandidateCount, cancellationToken);
             var lexicalTask = lexical.SearchAsync(knowledgeBaseId, query, Math.Max(finalTopK, _options.Bm25CandidateCount), cancellationToken);
             await Task.WhenAll(vectorTask, lexicalTask);
             var vectorHits = await vectorTask;
@@ -50,7 +54,7 @@ public sealed class KnowledgeSearchService(
             if (pointIds.Length == 0) return result;
             var dbChunks = await (from c in db.DocumentChunks.AsNoTracking()
                                   join d in db.Documents.AsNoTracking() on c.DocumentId equals d.Id
-                                  where c.KnowledgeBaseId == knowledgeBaseId && pointIds.Contains(c.Id) && d.Status == DocumentStatus.Ready
+                                  where c.KnowledgeBaseId == knowledgeBaseId && pointIds.Contains(c.Id) && d.IndexVersion > 0
                                   select new { c.Id, c.DocumentId, d.FileName, c.ChunkIndex, c.Text }).ToListAsync(cancellationToken);
 
             var data = dbChunks.ToDictionary(x => x.Id);
