@@ -26,7 +26,7 @@ jobs:
           cache-dependency-path: src/KnowledgeRag.Admin/package-lock.json
       - run: npm ci
       - name: Import official assistant-ui sidebar
-        run: npx assistant-ui@latest add thread-list-sidebar -y
+        run: npx assistant-ui@latest add threadlist-sidebar -y
       - name: Commit registry output
         working-directory: .
         run: |
