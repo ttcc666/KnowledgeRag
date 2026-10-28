@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using KnowledgeRag.Application.Contracts;
 using KnowledgeRag.Infrastructure.Configuration;
 using KnowledgeRag.Infrastructure.Observability;
@@ -5,6 +6,14 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 namespace KnowledgeRag.Infrastructure.Search;
+
+public sealed record QuerySearchProgress(
+    int Index,
+    int QueryCount,
+    string Query,
+    string Status,
+    int ResultCount = 0,
+    long? ElapsedMs = null);
 
 /// <summary>
 /// Executes query variants in isolated DI scopes so each search owns its own DbContext,
@@ -22,13 +31,15 @@ public sealed class MultiQuerySearchService(
         Guid knowledgeBaseId,
         string originalQuery,
         IReadOnlyList<string> queries,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Func<QuerySearchProgress, CancellationToken, Task>? onQueryProgress = null)
     {
         using var activity = Telemetry.ActivitySource.StartActivity("rag.multi_query_search");
         var normalized = NormalizeQueries(originalQuery, queries, _options.PlannerMaxQueries);
         activity?.SetTag("rag.query_count", normalized.Count);
 
-        var tasks = normalized.Select(query => SearchOneAsync(knowledgeBaseId, query, cancellationToken)).ToArray();
+        var tasks = normalized.Select((query, index) =>
+            SearchOneWithProgressAsync(knowledgeBaseId, query, index + 1, normalized.Count, onQueryProgress, cancellationToken)).ToArray();
         var rankedLists = await Task.WhenAll(tasks);
         var merged = Merge(rankedLists, Math.Max(_options.MaxMergedEvidence, _options.TopK));
         activity?.SetTag("rag.merged_candidates", merged.Count);
@@ -72,11 +83,34 @@ public sealed class MultiQuerySearchService(
         return result;
     }
 
-    private async Task<IReadOnlyList<SearchHit>> SearchOneAsync(Guid knowledgeBaseId, string query, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<SearchHit>> SearchOneWithProgressAsync(
+        Guid knowledgeBaseId,
+        string query,
+        int index,
+        int queryCount,
+        Func<QuerySearchProgress, CancellationToken, Task>? onProgress,
+        CancellationToken cancellationToken)
     {
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var search = scope.ServiceProvider.GetRequiredService<KnowledgeSearchService>();
-        return await search.SearchAsync(knowledgeBaseId, query, _options.MultiQueryTopK, cancellationToken);
+        var timer = Stopwatch.StartNew();
+        if (onProgress is not null)
+            await onProgress(new QuerySearchProgress(index, queryCount, query, "running"), cancellationToken);
+
+        IReadOnlyList<SearchHit> results;
+        try
+        {
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var search = scope.ServiceProvider.GetRequiredService<KnowledgeSearchService>();
+            results = await search.SearchAsync(knowledgeBaseId, query, _options.MultiQueryTopK, cancellationToken);
+        }
+        catch (Exception) when (onProgress is not null && !cancellationToken.IsCancellationRequested)
+        {
+            await onProgress(new QuerySearchProgress(index, queryCount, query, "failed", 0, timer.ElapsedMilliseconds), cancellationToken);
+            throw;
+        }
+
+        if (onProgress is not null)
+            await onProgress(new QuerySearchProgress(index, queryCount, query, "completed", results.Count, timer.ElapsedMilliseconds), cancellationToken);
+        return results;
     }
 
     private static List<HybridCandidate> Merge(IReadOnlyList<SearchHit>[] rankedLists, int maxCandidates)
