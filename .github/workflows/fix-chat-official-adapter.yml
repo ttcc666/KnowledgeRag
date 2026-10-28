@@ -19,21 +19,7 @@ jobs:
           ref: refactor/chat-official-assistant-ui-elements
       - name: Fix KnowledgeRag adapter only
         run: |
-          python3 <<'PY'
-          from pathlib import Path
-          p = Path('src/KnowledgeRag.Admin/src/features/chat/chat-page.tsx')
-          text = p.read_text()
-          text = text.replace("        <span className='min-w-0 flex-1 truncate'>{event.tool || event.type}</span>", "        <span className='min-w-0 flex-1 truncate'>{event.label || event.type}</span>")
-          dead = """  const onSource = (source: ChatSource) => {
-    setSelectedSource(source)
-    if (window.innerWidth < 1024) setMobileSource(true)
-    else setSourcePanel(true)
-  }
-
-"""
-          text = text.replace(dead, '')
-          p.write_text(text)
-          PY
+          python3 -c 'from pathlib import Path; import re; p=Path("src/KnowledgeRag.Admin/src/features/chat/chat-page.tsx"); t=p.read_text(); t=t.replace("{event.tool || event.type}", "{event.label || event.type}"); t=re.sub(r"\n  const onSource = \(source: ChatSource\) => \{.*?\n  \}\n", "\n", t, count=1, flags=re.S); p.write_text(t)'
           rm -f .github/workflows/fix-chat-official-adapter.yml
       - name: Commit adapter fix
         run: |
