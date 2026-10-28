@@ -148,7 +148,10 @@ public sealed class KnowledgeIngestionService(
         var document = await db.Documents.SingleOrDefaultAsync(x => x.Id == request.DocumentId && x.KnowledgeBaseId == request.KnowledgeBaseId, cancellationToken);
         if (document is null || document.Status is DocumentStatus.Ready or DocumentStatus.Cancelled) return;
 
-        var currentPointIds = new List<Guid>();
+        var targetVersion = DocumentIndexVersion.Next(document.IndexVersion);
+        activity?.SetTag("rag.index.previous_version", document.IndexVersion);
+        activity?.SetTag("rag.index.target_version", targetVersion);
+        var stagedPointIds = new List<Guid>();
         string? parsePath = null;
         try
         {
@@ -174,13 +177,12 @@ public sealed class KnowledgeIngestionService(
             activity?.SetTag("rag.chunk_count", chunks.Count);
             await EnsureNotCancelledAsync(document, cancellationToken);
 
-            var previousChunks = await db.DocumentChunks.Where(x => x.DocumentId == document.Id).ToListAsync(cancellationToken);
-            if (previousChunks.Count > 0)
-            {
-                await vectorStore.DeleteAsync(previousChunks.Select(x => x.Id).ToList(), cancellationToken);
-                db.DocumentChunks.RemoveRange(previousChunks);
-                await db.SaveChangesAsync(cancellationToken);
-            }
+            // Stable generation ids make retries idempotent and let us remove points left by a
+            // crashed attempt before starting the same generation again.
+            var targetPointIds = Enumerable.Range(0, chunks.Count)
+                .Select(i => DocumentIndexVersion.CreatePointId(document.Id, targetVersion, i))
+                .ToList();
+            await CleanupVectorsAsync(targetPointIds, document.Id);
 
             var chunkEntities = new List<DocumentChunkEntity>(chunks.Count);
             for (var offset = 0; offset < chunks.Count; offset += _rag.EmbeddingBatchSize)
@@ -191,9 +193,9 @@ public sealed class KnowledgeIngestionService(
                 var points = new List<VectorPoint>(batch.Count);
                 for (var i = 0; i < batch.Count; i++)
                 {
-                    var chunkId = Guid.NewGuid();
-                    currentPointIds.Add(chunkId);
                     var chunkIndex = offset + i;
+                    var chunkId = targetPointIds[chunkIndex];
+                    stagedPointIds.Add(chunkId);
                     chunkEntities.Add(new DocumentChunkEntity
                     {
                         Id = chunkId,
@@ -214,18 +216,35 @@ public sealed class KnowledgeIngestionService(
 
             await EnsureNotCancelledAsync(document, cancellationToken);
             await NotifySafeAsync(document, request.UserId, 90, "storing", cancellationToken, chunkEntities.Count);
-            db.DocumentChunks.AddRange(chunkEntities);
-            document.ChunkCount = chunkEntities.Count;
-            document.Status = DocumentStatus.Ready;
-            document.LastError = null;
-            document.UpdatedAt = DateTimeOffset.UtcNow;
-            await db.SaveChangesAsync(cancellationToken);
+
+            // The old chunk set stays queryable for the whole build. The database transaction is
+            // the activation boundary: readers observe either the complete old set or complete new set.
+            var oldChunks = await db.DocumentChunks.Where(x => x.DocumentId == document.Id).ToListAsync(cancellationToken);
+            var oldPointIds = oldChunks.Select(x => x.Id).ToList();
+            await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))
+            {
+                if (oldChunks.Count > 0) db.DocumentChunks.RemoveRange(oldChunks);
+                db.DocumentChunks.AddRange(chunkEntities);
+                document.ChunkCount = chunkEntities.Count;
+                document.IndexVersion = targetVersion;
+                document.Status = DocumentStatus.Ready;
+                document.LastError = null;
+                document.UpdatedAt = DateTimeOffset.UtcNow;
+                await db.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            activity?.SetTag("rag.index.activated_version", targetVersion);
             await NotifySafeAsync(document, request.UserId, 100, "completed", cancellationToken, document.ChunkCount);
+
+            // Old vectors are no longer reachable through the active DB chunk set. Cleanup is
+            // deliberately best-effort so an external vector-store outage cannot roll back activation.
+            await CleanupVectorsAsync(oldPointIds, document.Id);
         }
         catch (DocumentProcessingCancelledException)
         {
-            await CleanupVectorsAsync(currentPointIds, document.Id);
-            foreach (var entry in db.ChangeTracker.Entries<DocumentChunkEntity>().Where(x => x.Entity.DocumentId == document.Id).ToList()) entry.State = EntityState.Detached;
+            await CleanupVectorsAsync(stagedPointIds, document.Id);
+            DetachDocumentChunks(document.Id);
             await db.Entry(document).ReloadAsync(CancellationToken.None);
             document.Status = DocumentStatus.Cancelled;
             document.LastError = null;
@@ -240,11 +259,11 @@ public sealed class KnowledgeIngestionService(
         catch (Exception ex)
         {
             activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Error, ex.Message);
-            await CleanupVectorsAsync(currentPointIds, document.Id);
-            foreach (var entry in db.ChangeTracker.Entries<DocumentChunkEntity>().Where(x => x.Entity.DocumentId == document.Id).ToList()) entry.State = EntityState.Detached;
+            await CleanupVectorsAsync(stagedPointIds, document.Id);
+            DetachDocumentChunks(document.Id);
+            try { await db.Entry(document).ReloadAsync(CancellationToken.None); } catch { }
             document.Status = DocumentStatus.Failed;
             document.LastError = ex.Message.Length <= 4000 ? ex.Message : ex.Message[..4000];
-            document.ChunkCount = 0;
             document.UpdatedAt = DateTimeOffset.UtcNow;
             try { await db.SaveChangesAsync(CancellationToken.None); }
             catch (Exception saveEx) { logger.LogError(saveEx, "Failed to persist indexing failure for document {DocumentId}", document.Id); }
@@ -261,6 +280,12 @@ public sealed class KnowledgeIngestionService(
     {
         await db.Entry(document).ReloadAsync(cancellationToken);
         if (document.Status == DocumentStatus.Cancelled) throw new DocumentProcessingCancelledException();
+    }
+
+    private void DetachDocumentChunks(Guid documentId)
+    {
+        foreach (var entry in db.ChangeTracker.Entries<DocumentChunkEntity>().Where(x => x.Entity.DocumentId == documentId).ToList())
+            entry.State = EntityState.Detached;
     }
 
     private async Task CleanupVectorsAsync(IReadOnlyCollection<Guid> pointIds, Guid documentId)
