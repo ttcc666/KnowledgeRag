@@ -33,39 +33,60 @@ public sealed class RagAgentService(
         string message,
         string? sessionJson,
         Func<string, CancellationToken, Task> onDelta,
+        Func<RagProgressEvent, CancellationToken, Task>? onProgress = null,
         CancellationToken cancellationToken = default)
-        => await ExecuteAsync(new RagWorkflowInput(knowledgeBaseId, message, sessionJson, onDelta), cancellationToken);
+        => await ExecuteAsync(
+            new RagWorkflowInput(knowledgeBaseId, message, sessionJson, onDelta, new RagProgressReporter(onProgress)),
+            cancellationToken);
 
     private async Task<AgentTurnResult> ExecuteAsync(RagWorkflowInput input, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(input.Message)) throw new InvalidOperationException("消息不能为空。");
 
+        var timer = Stopwatch.StartNew();
         using var activity = Telemetry.ActivitySource.StartActivity("rag.workflow.turn");
         activity?.SetTag("rag.knowledge_base_id", input.KnowledgeBaseId.ToString());
         activity?.SetTag("rag.workflow.enabled", _rag.EnableAgentWorkflow);
         activity?.SetTag("rag.reviewer.enabled", _rag.EnableReviewer);
 
-        RagWorkflowState state;
-        if (_rag.EnableAgentWorkflow)
+        await ReportProgressAsync(input, "workflow", "workflow.started", "KnowledgeRagWorkflow", "开始处理问题", "running",
+            cancellationToken, "workflow", data: new { reviewerEnabled = _rag.EnableReviewer, plannerEnabled = _rag.EnablePlanner });
+
+        try
         {
-            state = await RunWorkflowAsync(input, cancellationToken);
+            RagWorkflowState state;
+            if (_rag.EnableAgentWorkflow)
+                state = await RunWorkflowAsync(input, cancellationToken);
+            else
+                state = await RunLegacyCompatibleAsync(input, cancellationToken);
+
+            // Reviewer mode buffers the answer draft. Only the reviewed/repaired result is sent as text.
+            if (input.OnDelta is not null && _rag.EnableReviewer && !string.IsNullOrEmpty(state.Answer))
+                await input.OnDelta(state.Answer, cancellationToken);
+
+            await ReportProgressAsync(input, "workflow", "workflow.completed", "KnowledgeRagWorkflow", "回答已完成", "completed",
+                cancellationToken, "workflow", timer.ElapsedMilliseconds,
+                new { reviewPassed = state.ReviewPassed, evidenceCount = state.SafeEvidence.Count, retrievalRounds = state.RetrievalRound });
+
+            metrics.RecordChat(input.Message, state.Answer);
+            activity?.SetTag("rag.review.passed", state.ReviewPassed);
+            activity?.SetTag("rag.retrieval.rounds", state.RetrievalRound);
+            activity?.SetTag("rag.evidence.count", state.SafeEvidence.Count);
+
+            return new AgentTurnResult(state.Answer, state.SessionJson, state.SafeEvidence);
         }
-        else
+        catch (OperationCanceledException)
         {
-            state = await RunLegacyCompatibleAsync(input, cancellationToken);
+            await ReportProgressAsync(input, "workflow", "workflow.cancelled", "KnowledgeRagWorkflow", "已停止执行", "cancelled",
+                CancellationToken.None, "workflow", timer.ElapsedMilliseconds);
+            throw;
         }
-
-        // When review is enabled we intentionally buffer the draft so unsupported content is
-        // never streamed to the client. Emit only the final reviewed/repaired answer.
-        if (input.OnDelta is not null && _rag.EnableReviewer && !string.IsNullOrEmpty(state.Answer))
-            await input.OnDelta(state.Answer, cancellationToken);
-
-        metrics.RecordChat(input.Message, state.Answer);
-        activity?.SetTag("rag.review.passed", state.ReviewPassed);
-        activity?.SetTag("rag.retrieval.rounds", state.RetrievalRound);
-        activity?.SetTag("rag.evidence.count", state.SafeEvidence.Count);
-
-        return new AgentTurnResult(state.Answer, state.SessionJson, state.SafeEvidence);
+        catch (Exception ex)
+        {
+            await ReportProgressAsync(input, "workflow", "workflow.failed", "KnowledgeRagWorkflow", "执行失败", "failed",
+                CancellationToken.None, "workflow", timer.ElapsedMilliseconds, new { errorCode = ex.GetType().Name });
+            throw;
+        }
     }
 
     private async Task<RagWorkflowState> RunWorkflowAsync(RagWorkflowInput input, CancellationToken cancellationToken)
@@ -86,17 +107,20 @@ public sealed class RagAgentService(
         builder.WithOpenTelemetry(_ => { }, Telemetry.ActivitySource);
         var workflow = builder.Build();
 
-        await using var run = await InProcessExecution.RunAsync(
+        // Streaming execution keeps the workflow observable while typed executors still own
+        // deterministic search, retry and state transitions.
+        await using var run = await InProcessExecution.RunStreamingAsync(
             workflow,
             new RagWorkflowState(input),
             sessionId: null,
             cancellationToken);
 
-        var final = run.NewEvents
-            .OfType<WorkflowOutputEvent>()
-            .Select(x => x.Data)
-            .OfType<RagWorkflowState>()
-            .LastOrDefault();
+        RagWorkflowState? final = null;
+        await foreach (var workflowEvent in run.WatchStreamAsync(cancellationToken))
+        {
+            if (workflowEvent is WorkflowOutputEvent output && output.Data is RagWorkflowState state)
+                final = state;
+        }
 
         return final ?? throw new InvalidOperationException("RAG workflow 未产生最终输出。");
     }
@@ -104,7 +128,12 @@ public sealed class RagAgentService(
     private async Task<RagWorkflowState> RunLegacyCompatibleAsync(RagWorkflowInput input, CancellationToken cancellationToken)
     {
         using var activity = Telemetry.ActivitySource.StartActivity("rag.workflow.legacy");
+        var timer = Stopwatch.StartNew();
+        await ReportProgressAsync(input, "retrieval", "stage.started", "KnowledgeSearchService", "检索知识库", "running",
+            cancellationToken, "legacy-retrieval");
         var hits = await search.SearchAsync(input.KnowledgeBaseId, input.Message, _rag.TopK, cancellationToken);
+        await ReportProgressAsync(input, "retrieval", "stage.completed", "KnowledgeSearchService", "检索完成", "completed",
+            cancellationToken, "legacy-retrieval", timer.ElapsedMilliseconds, new { evidenceCount = hits.Count });
         var plan = RagWorkflowPolicy.NormalizePlan(new QueryPlan
         {
             Intent = "answer",
@@ -120,10 +149,17 @@ public sealed class RagAgentService(
     private async Task<RagWorkflowState> PlanAsync(RagWorkflowState state, CancellationToken cancellationToken)
     {
         using var activity = Telemetry.ActivitySource.StartActivity("rag.workflow.plan");
+        var timer = Stopwatch.StartNew();
+        await ReportProgressAsync(state, "planner", "agent.started", "QueryPlannerAgent", "正在分析问题并规划检索", "running",
+            cancellationToken, "planner");
+
         if (!_rag.EnablePlanner)
         {
             var fallback = RagWorkflowPolicy.NormalizePlan(null, state.Input.Message, 1);
             activity?.SetTag("rag.plan.fallback", true);
+            await ReportProgressAsync(state, "planner", "agent.completed", "QueryPlannerAgent", "使用原始问题检索", "completed",
+                cancellationToken, "planner", timer.ElapsedMilliseconds,
+                new { fallback = true, intent = fallback.Intent, queryCount = fallback.Queries.Count, requiresKnowledge = fallback.RequiresKnowledge });
             return state with { Plan = fallback };
         }
 
@@ -148,15 +184,19 @@ public sealed class RagAgentService(
             activity?.SetTag("rag.plan.intent", plan.Intent);
             activity?.SetTag("rag.plan.requires_knowledge", plan.RequiresKnowledge);
             activity?.SetTag("rag.plan.query_count", plan.Queries.Count);
+            await ReportProgressAsync(state, "planner", "agent.completed", "QueryPlannerAgent", "问题分析完成", "completed",
+                cancellationToken, "planner", timer.ElapsedMilliseconds,
+                new { fallback = false, intent = plan.Intent, answerMode = plan.AnswerMode, requiresKnowledge = plan.RequiresKnowledge, queryCount = plan.Queries.Count, queries = plan.Queries });
             return state with { Plan = plan };
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Planning is an optimization, not a single point of failure. A deterministic
-            // original-query fallback keeps chat available when a provider lacks JSON schema support.
             activity?.SetTag("rag.plan.fallback", true);
             activity?.SetTag("rag.plan.error", ex.GetType().Name);
             var fallback = RagWorkflowPolicy.NormalizePlan(null, state.Input.Message, 1);
+            await ReportProgressAsync(state, "planner", "agent.fallback", "QueryPlannerAgent", "规划服务不可用，改用原始问题", "warning",
+                CancellationToken.None, "planner", timer.ElapsedMilliseconds,
+                new { fallback = true, intent = fallback.Intent, queryCount = fallback.Queries.Count });
             return state with { Plan = fallback };
         }
     }
@@ -164,10 +204,16 @@ public sealed class RagAgentService(
     private async Task<RagWorkflowState> RetrieveAsync(RagWorkflowState state, CancellationToken cancellationToken)
     {
         using var activity = Telemetry.ActivitySource.StartActivity("rag.workflow.retrieve");
+        var timer = Stopwatch.StartNew();
         var plan = state.Plan ?? RagWorkflowPolicy.NormalizePlan(null, state.Input.Message, 1);
+        await ReportProgressAsync(state, "retrieval", "stage.started", "MultiQuerySearchService", "正在并行检索知识库", "running",
+            cancellationToken, "retrieval", data: new { queryCount = plan.Queries.Count, retrievalRound = state.RetrievalRound + 1, queries = plan.Queries });
+
         if (!plan.RequiresKnowledge)
         {
             activity?.SetTag("rag.retrieve.skipped", true);
+            await ReportProgressAsync(state, "retrieval", "stage.skipped", "MultiQuerySearchService", "当前问题无需检索知识库", "skipped",
+                cancellationToken, "retrieval", timer.ElapsedMilliseconds, new { skipped = true, evidenceCount = 0 });
             return state with { Evidence = [], RetrievalRound = state.RetrievalRound + 1 };
         }
 
@@ -175,9 +221,13 @@ public sealed class RagAgentService(
             state.Input.KnowledgeBaseId,
             state.Input.Message,
             plan.Queries,
-            cancellationToken);
+            cancellationToken,
+            (progress, token) => ReportQueryProgressAsync(state, progress, token, "query"));
 
         activity?.SetTag("rag.retrieve.evidence_count", hits.Count);
+        await ReportProgressAsync(state, "retrieval", "stage.completed", "MultiQuerySearchService", "检索、融合与重排完成", "completed",
+            cancellationToken, "retrieval", timer.ElapsedMilliseconds,
+            new { queryCount = plan.Queries.Count, evidenceCount = hits.Count, retrievalRound = state.RetrievalRound + 1 });
         return state with { Evidence = hits, RetrievalRound = state.RetrievalRound + 1 };
     }
 
@@ -187,6 +237,7 @@ public sealed class RagAgentService(
         CancellationToken cancellationToken)
     {
         using var activity = Telemetry.ActivitySource.StartActivity("rag.workflow.answer");
+        var timer = Stopwatch.StartNew();
         var specialist = BuildAgent(
             "EvidenceAnalysisSpecialist",
             _ai.ResolveReviewerModel(),
@@ -218,18 +269,30 @@ public sealed class RagAgentService(
 
         var prompt = BuildAnswerPrompt(state, repairInstruction);
         var session = await ResolveSessionAsync(agent, state.Input.SessionJson, cancellationToken);
+        await ReportProgressAsync(state, "answer", "agent.started", "KnowledgeAnswerAgent",
+            string.IsNullOrWhiteSpace(repairInstruction) ? "正在根据证据生成回答" : "正在修复回答",
+            "running", cancellationToken, "answer", data: new { evidenceCount = state.SafeEvidence.Count, repair = !string.IsNullOrWhiteSpace(repairInstruction) });
 
-        if (state.Input.OnDelta is not null && !_rag.EnableReviewer)
+        var shouldStreamToClient = state.Input.OnDelta is not null && !_rag.EnableReviewer;
+        if (shouldStreamToClient || state.Input.Progress is not null)
         {
             var answer = new StringBuilder();
+            var activeTools = new Dictionary<string, (string Name, Stopwatch Timer)>(StringComparer.Ordinal);
             await foreach (var update in agent.RunStreamingAsync(prompt, session, cancellationToken: cancellationToken))
             {
+                await ReportToolEventsAsync(state, update.Contents, activeTools, cancellationToken);
                 if (string.IsNullOrEmpty(update.Text)) continue;
                 answer.Append(update.Text);
-                await state.Input.OnDelta(update.Text, cancellationToken);
+                if (shouldStreamToClient && state.Input.OnDelta is not null)
+                    await state.Input.OnDelta(update.Text, cancellationToken);
             }
+
             var serialized = await agent.SerializeSessionAsync(session, cancellationToken: cancellationToken);
-            activity?.SetTag("rag.answer.streaming", true);
+            activity?.SetTag("rag.answer.streaming", shouldStreamToClient);
+            activity?.SetTag("rag.answer.length", answer.Length);
+            await ReportProgressAsync(state, "answer", "agent.completed", "KnowledgeAnswerAgent", "回答草稿已生成", "completed",
+                cancellationToken, "answer", timer.ElapsedMilliseconds,
+                new { answerLength = answer.Length, streamedToClient = shouldStreamToClient, evidenceCount = state.SafeEvidence.Count });
             return state with { Answer = answer.ToString(), SessionJson = serialized.GetRawText() };
         }
 
@@ -238,20 +301,32 @@ public sealed class RagAgentService(
         var serializedSession = await agent.SerializeSessionAsync(session, cancellationToken: cancellationToken);
         activity?.SetTag("rag.answer.streaming", false);
         activity?.SetTag("rag.answer.length", finalAnswer.Length);
+        await ReportProgressAsync(state, "answer", "agent.completed", "KnowledgeAnswerAgent", "回答草稿已生成", "completed",
+            cancellationToken, "answer", timer.ElapsedMilliseconds,
+            new { answerLength = finalAnswer.Length, streamedToClient = false, evidenceCount = state.SafeEvidence.Count });
         return state with { Answer = finalAnswer, SessionJson = serializedSession.GetRawText() };
     }
 
     private async Task<RagWorkflowState> ReviewAndRepairAsync(RagWorkflowState state, CancellationToken cancellationToken)
     {
         if (!_rag.EnableReviewer)
+        {
+            await ReportProgressAsync(state, "review", "stage.skipped", "EvidenceReviewerAgent", "已跳过证据审核", "skipped",
+                cancellationToken, "review", data: new { reviewerEnabled = false });
             return state with { ReviewPassed = true };
+        }
 
         var current = state;
         var maxRetries = Math.Clamp(_rag.ReviewerMaxRetries, 0, 3);
         for (var attempt = 0; attempt <= maxRetries; attempt++)
         {
+            var timer = Stopwatch.StartNew();
+            var stepId = "review-" + (attempt + 1);
             using var activity = Telemetry.ActivitySource.StartActivity("rag.workflow.review");
             activity?.SetTag("rag.review.attempt", attempt + 1);
+            await ReportProgressAsync(current, "review", "agent.started", "EvidenceReviewerAgent", "正在验证回答与引用", "running",
+                cancellationToken, stepId, data: new { attempt = attempt + 1, maxAttempts = maxRetries + 1 });
+
             var review = await ReviewAsync(current, cancellationToken);
             var accepted = RagWorkflowPolicy.IsReviewAccepted(review, _rag.ReviewerMinConfidence);
             activity?.SetTag("rag.review.supported", review.Supported);
@@ -259,27 +334,134 @@ public sealed class RagAgentService(
             activity?.SetTag("rag.review.accepted", accepted);
 
             current = current with { Review = review, ReviewPassed = accepted };
+            var issueCount = review.UnsupportedClaims.Count + review.MissingEvidence.Count + review.CitationErrors.Count;
+            await ReportProgressAsync(current, "review", "agent.completed", "EvidenceReviewerAgent",
+                accepted ? "证据审核通过" : "发现证据缺口，需要修复",
+                accepted ? "completed" : "warning", cancellationToken, stepId, timer.ElapsedMilliseconds,
+                new { supported = review.Supported, confidence = review.Confidence, issueCount, unsupportedClaimCount = review.UnsupportedClaims.Count, missingEvidenceCount = review.MissingEvidence.Count, citationErrorCount = review.CitationErrors.Count, attempt = attempt + 1 });
+
             if (accepted) return current;
             if (attempt >= maxRetries) break;
 
+            var repairStep = "repair-" + (attempt + 1);
+            await ReportProgressAsync(current, "repair", "repair.started", "KnowledgeRagWorkflow", "开始补充检索并修复回答", "running",
+                cancellationToken, repairStep, data: new { attempt = attempt + 1, issueCount });
+
             var supplementalQueries = RagWorkflowPolicy.SupplementalQueries(review, current.Input.Message, _rag.PlannerMaxQueries);
+            var retrievalTimer = Stopwatch.StartNew();
+            var supplementalStep = "supplemental-retrieval-" + (attempt + 1);
+            await ReportProgressAsync(current, "retrieval", "stage.started", "MultiQuerySearchService", "补充检索证据", "running",
+                cancellationToken, supplementalStep, data: new { queryCount = supplementalQueries.Count, queries = supplementalQueries, retrievalRound = current.RetrievalRound + 1 });
             var supplemental = await multiQuerySearch.SearchAsync(
                 current.Input.KnowledgeBaseId,
                 current.Input.Message,
                 supplementalQueries,
-                cancellationToken);
+                cancellationToken,
+                (progress, token) => ReportQueryProgressAsync(current, progress, token, "supplemental-query-" + (attempt + 1)));
             var merged = RagWorkflowPolicy.MergeEvidence(current.SafeEvidence, supplemental, _rag.MaxMergedEvidence);
             current = current with { Evidence = merged, RetrievalRound = current.RetrievalRound + 1 };
+            await ReportProgressAsync(current, "retrieval", "stage.completed", "MultiQuerySearchService", "补充检索完成", "completed",
+                cancellationToken, supplementalStep, retrievalTimer.ElapsedMilliseconds,
+                new { newEvidenceCount = supplemental.Count, mergedEvidenceCount = merged.Count, retrievalRound = current.RetrievalRound });
 
             var repairInstruction = BuildRepairInstruction(review);
-            // Regenerate from the original user-session snapshot, not the rejected draft session.
             current = current with { SessionJson = current.Input.SessionJson ?? string.Empty };
             current = await GenerateAnswerAsync(current, repairInstruction, cancellationToken);
+            await ReportProgressAsync(current, "repair", "repair.completed", "KnowledgeRagWorkflow", "回答已修复，进入最终审核", "completed",
+                cancellationToken, repairStep, data: new { evidenceCount = current.SafeEvidence.Count });
         }
 
-        // Never expose a draft that the reviewer still considers unsupported after the bounded repair.
+        await ReportProgressAsync(current, "review", "review.rejected", "EvidenceReviewerAgent", "最终审核未通过，返回证据不足提示", "warning",
+            cancellationToken, "review-final", data: new { failClosed = true });
         return current with { Answer = RagWorkflowPolicy.SafeUnsupportedAnswer(), ReviewPassed = false };
     }
+
+    private static Task ReportProgressAsync(
+        RagWorkflowInput input,
+        string stage,
+        string type,
+        string actor,
+        string label,
+        string status,
+        CancellationToken cancellationToken,
+        string stepId,
+        long? elapsedMs = null,
+        object? data = null)
+        => input.Progress?.ReportAsync(stepId, stage, type, actor, label, status, cancellationToken, elapsedMs, data)
+           ?? Task.CompletedTask;
+
+    private static Task ReportProgressAsync(
+        RagWorkflowState state,
+        string stage,
+        string type,
+        string actor,
+        string label,
+        string status,
+        CancellationToken cancellationToken,
+        string stepId,
+        long? elapsedMs = null,
+        object? data = null)
+        => ReportProgressAsync(state.Input, stage, type, actor, label, status, cancellationToken, stepId, elapsedMs, data);
+
+    private static Task ReportQueryProgressAsync(
+        RagWorkflowState state,
+        QuerySearchProgress progress,
+        CancellationToken cancellationToken,
+        string prefix)
+    {
+        var status = progress.Status == "failed" ? "failed" : progress.Status;
+        var label = progress.Status switch
+        {
+            "running" => "检索查询 " + progress.Index + "/" + progress.QueryCount,
+            "completed" => "检索完成（" + progress.ResultCount + " 条）",
+            _ => "检索查询失败"
+        };
+        var safeQuery = progress.Query.Length <= 180 ? progress.Query : progress.Query[..180] + "…";
+        return ReportProgressAsync(state, "retrieval", "query." + progress.Status, "KnowledgeSearchService", label, status,
+            cancellationToken, prefix + "-" + progress.Index, progress.ElapsedMs,
+            new { query = safeQuery, index = progress.Index, queryCount = progress.QueryCount, resultCount = progress.ResultCount });
+    }
+
+    private async Task ReportToolEventsAsync(
+        RagWorkflowState state,
+        IEnumerable<AIContent> contents,
+        Dictionary<string, (string Name, Stopwatch Timer)> activeTools,
+        CancellationToken cancellationToken)
+    {
+        foreach (var content in contents)
+        {
+            var contentType = content.GetType().Name;
+            if (contentType == "FunctionCallContent")
+            {
+                var name = ReadStringProperty(content, "Name") ?? "tool";
+                var callId = ReadStringProperty(content, "CallId") ?? name + "-" + activeTools.Count;
+                if (activeTools.ContainsKey(callId)) continue;
+
+                activeTools[callId] = (name, Stopwatch.StartNew());
+                var specialist = name == "analyze_evidence";
+                await ReportProgressAsync(state, "answer", "tool.started",
+                    specialist ? "EvidenceAnalysisSpecialist" : name,
+                    specialist ? "调用证据分析专员" : "调用工具：" + name,
+                    "running", cancellationToken, "tool-" + callId,
+                    data: new { toolName = name, parentActor = "KnowledgeAnswerAgent" });
+            }
+            else if (contentType == "FunctionResultContent")
+            {
+                var callId = ReadStringProperty(content, "CallId");
+                if (string.IsNullOrWhiteSpace(callId) || !activeTools.Remove(callId, out var tool)) continue;
+
+                var specialist = tool.Name == "analyze_evidence";
+                await ReportProgressAsync(state, "answer", "tool.completed",
+                    specialist ? "EvidenceAnalysisSpecialist" : tool.Name,
+                    specialist ? "证据分析完成" : "工具调用完成：" + tool.Name,
+                    "completed", cancellationToken, "tool-" + callId, tool.Timer.ElapsedMilliseconds,
+                    new { toolName = tool.Name, parentActor = "KnowledgeAnswerAgent" });
+            }
+        }
+    }
+
+    private static string? ReadStringProperty(object value, string name)
+        => value.GetType().GetProperty(name)?.GetValue(value)?.ToString();
 
     private async Task<EvidenceReview> ReviewAsync(RagWorkflowState state, CancellationToken cancellationToken)
     {
@@ -306,7 +488,6 @@ public sealed class RagAgentService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Reviewer failure must fail closed when review is enabled.
             using var activity = Telemetry.ActivitySource.StartActivity("rag.workflow.review_error");
             activity?.SetTag("rag.review.error", ex.GetType().Name);
             return new EvidenceReview
