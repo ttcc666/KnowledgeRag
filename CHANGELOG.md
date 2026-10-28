@@ -18,10 +18,14 @@
 
 ### Added
 
-- 暂无。
+- 新增 `DEVELOPMENT_WORKFLOW.md`，正式记录分支、Draft PR、增量 CI、Ready 全量验证、Changelog、Hotfix、数据库与 Agent/RAG 变更的开发流程。
 
 ### Changed
 
+- CI 改为分层策略：Draft PR 根据改动路径选择 frontend / backend / native 测试；PR 转为 Ready、`main` push、手动触发和 nightly schedule 时强制完整 CI。
+- PR 分支不再同时触发 `push` 与 `pull_request` 两套重复 CI；`push` 仅监听 `main`。
+- 同一 PR 的新 commit 会通过 `concurrency.cancel-in-progress` 自动取消旧 CI，减少无效 runner 消耗。
+- `build-test` 与 `native-backends-smoke` 保留稳定的检查名称；无相关改动时以轻量 no-op 成功结束，避免 required check 因工作流不触发而悬挂。
 - 成本估算中的模型价格查询改为跨数据库兼容实现：Tenant / Model / Active 条件仍由数据库过滤，`UpdatedAt` 的最新记录选择改为 materialize 后在内存排序，确保 SQLite 与 PostgreSQL 行为一致。
 
 ### Fixed
