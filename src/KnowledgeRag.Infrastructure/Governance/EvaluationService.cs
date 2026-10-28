@@ -26,7 +26,8 @@ public sealed class EvaluationService(
             .SingleOrDefaultAsync(x => x.Id == datasetId && x.TenantId == tenantId, ct)
             ?? throw new KeyNotFoundException("Evaluation Dataset 不存在。");
         await knowledgeBaseAccess.RequireAsync(actor, dataset.KnowledgeBaseId, KnowledgeBaseRole.Viewer, ct);
-        var cases = await db.Set<EvaluationCaseEntity>().AsNoTracking().Where(x => x.DatasetId == datasetId).OrderBy(x => x.CreatedAt).ToListAsync(ct);
+        var caseRows = await db.Set<EvaluationCaseEntity>().AsNoTracking().Where(x => x.DatasetId == datasetId).ToListAsync(ct);
+        var cases = caseRows.OrderBy(x => x.CreatedAt).ToList();
         if (cases.Count == 0) throw new InvalidOperationException("Evaluation Dataset 至少需要一个测试用例。");
 
         var run = new EvaluationRunEntity

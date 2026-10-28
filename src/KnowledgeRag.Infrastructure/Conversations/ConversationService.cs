@@ -145,18 +145,21 @@ public sealed class ConversationService(
     {
         if (profile.DailyRunLimit <= 0 && profile.MonthlyBudgetUsd <= 0) return;
         var tenantId = await governance.ResolveTenantIdAsync(knowledgeBaseId, ct);
-        var runs = db.Set<RagRunEntity>().AsNoTracking().Where(x => x.KnowledgeBaseId == knowledgeBaseId && x.TenantId == tenantId && x.Status == "completed");
+        var runs = await db.Set<RagRunEntity>().AsNoTracking()
+            .Where(x => x.KnowledgeBaseId == knowledgeBaseId && x.TenantId == tenantId && x.Status == "completed")
+            .Select(x => new { x.CreatedAt, x.EstimatedCostUsd })
+            .ToListAsync(ct);
         if (profile.DailyRunLimit > 0)
         {
-            var start = DateTimeOffset.UtcNow.Date;
-            var today = await runs.CountAsync(x => x.CreatedAt >= start, ct);
+            var start = new DateTimeOffset(DateTime.UtcNow.Date, TimeSpan.Zero);
+            var today = runs.Count(x => x.CreatedAt >= start);
             if (today >= profile.DailyRunLimit) throw new InvalidOperationException("该知识库已达到今日 RAG Run 配额。");
         }
         if (profile.MonthlyBudgetUsd > 0)
         {
             var now = DateTimeOffset.UtcNow;
             var start = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
-            var spend = await runs.Where(x => x.CreatedAt >= start).SumAsync(x => x.EstimatedCostUsd, ct);
+            var spend = runs.Where(x => x.CreatedAt >= start).Sum(x => x.EstimatedCostUsd);
             if (spend >= profile.MonthlyBudgetUsd) throw new InvalidOperationException("该知识库已达到本月 AI 成本预算。");
         }
     }

@@ -53,7 +53,7 @@ public sealed class GovernanceService(
         var runs = db.Set<RagRunEntity>().AsNoTracking().Where(x => x.TenantId == tenantId);
         var runCount = await runs.CountAsync(ct);
         var avgLatency = runCount == 0 ? 0 : await runs.AverageAsync(x => (double)x.LatencyMs, ct);
-        var cost = await runs.SumAsync(x => x.EstimatedCostUsd, ct);
+        var cost = (await runs.Select(x => x.EstimatedCostUsd).ToListAsync(ct)).Sum();
         return new GovernanceOverview(
             runCount,
             avgLatency,
@@ -121,15 +121,15 @@ public sealed class GovernanceService(
     public async Task<IReadOnlyList<RagRunEntity>> ListRunsAsync(ActorContext actor, Guid knowledgeBaseId, int limit = 100, CancellationToken ct = default)
     {
         await knowledgeBaseAccess.RequireAsync(actor, knowledgeBaseId, KnowledgeBaseRole.Viewer, ct);
-        return await db.Set<RagRunEntity>().AsNoTracking().Where(x => x.KnowledgeBaseId == knowledgeBaseId)
-            .OrderByDescending(x => x.CreatedAt).Take(Math.Clamp(limit, 1, 500)).ToListAsync(ct);
+        var rows = await db.Set<RagRunEntity>().AsNoTracking().Where(x => x.KnowledgeBaseId == knowledgeBaseId).ToListAsync(ct);
+        return rows.OrderByDescending(x => x.CreatedAt).Take(Math.Clamp(limit, 1, 500)).ToList();
     }
 
     public async Task<IReadOnlyList<AuditLogEntity>> ListAuditAsync(ActorContext actor, Guid tenantId, int limit = 200, CancellationToken ct = default)
     {
         await tenantAccess.RequireAsync(actor, tenantId, TenantRole.Admin, ct);
-        return await db.Set<AuditLogEntity>().AsNoTracking().Where(x => x.TenantId == tenantId)
-            .OrderByDescending(x => x.CreatedAt).Take(Math.Clamp(limit, 1, 1000)).ToListAsync(ct);
+        var rows = await db.Set<AuditLogEntity>().AsNoTracking().Where(x => x.TenantId == tenantId).ToListAsync(ct);
+        return rows.OrderByDescending(x => x.CreatedAt).Take(Math.Clamp(limit, 1, 1000)).ToList();
     }
 
     public async Task<IReadOnlyList<ModelPriceEntity>> ListModelPricesAsync(ActorContext actor, Guid tenantId, CancellationToken ct = default)
@@ -157,8 +157,8 @@ public sealed class GovernanceService(
     public async Task<IReadOnlyList<PromptProfileEntity>> ListPromptProfilesAsync(ActorContext actor, Guid tenantId, CancellationToken ct = default)
     {
         await tenantAccess.RequireAsync(actor, tenantId, TenantRole.Member, ct);
-        return await db.Set<PromptProfileEntity>().AsNoTracking().Where(x => x.TenantId == tenantId)
-            .OrderByDescending(x => x.UpdatedAt).ToListAsync(ct);
+        var rows = await db.Set<PromptProfileEntity>().AsNoTracking().Where(x => x.TenantId == tenantId).ToListAsync(ct);
+        return rows.OrderByDescending(x => x.UpdatedAt).ToList();
     }
 
     public async Task<PromptProfileEntity> SavePromptProfileAsync(ActorContext actor, Guid tenantId, PromptProfileUpsert request, CancellationToken ct = default)
@@ -197,7 +197,8 @@ public sealed class GovernanceService(
     public async Task<IReadOnlyList<WebhookSubscriptionEntity>> ListWebhooksAsync(ActorContext actor, Guid tenantId, CancellationToken ct = default)
     {
         await tenantAccess.RequireAsync(actor, tenantId, TenantRole.Admin, ct);
-        return await db.Set<WebhookSubscriptionEntity>().AsNoTracking().Where(x => x.TenantId == tenantId).OrderByDescending(x => x.UpdatedAt).ToListAsync(ct);
+        var rows = await db.Set<WebhookSubscriptionEntity>().AsNoTracking().Where(x => x.TenantId == tenantId).ToListAsync(ct);
+        return rows.OrderByDescending(x => x.UpdatedAt).ToList();
     }
 
     public async Task<WebhookSubscriptionEntity> SaveWebhookAsync(ActorContext actor, Guid tenantId, WebhookUpsert request, CancellationToken ct = default)
@@ -247,7 +248,8 @@ public sealed class GovernanceService(
     public async Task<IReadOnlyList<EvaluationDatasetEntity>> ListEvaluationDatasetsAsync(ActorContext actor, Guid tenantId, CancellationToken ct = default)
     {
         await tenantAccess.RequireAsync(actor, tenantId, TenantRole.Member, ct);
-        return await db.Set<EvaluationDatasetEntity>().AsNoTracking().Where(x => x.TenantId == tenantId).OrderByDescending(x => x.UpdatedAt).ToListAsync(ct);
+        var rows = await db.Set<EvaluationDatasetEntity>().AsNoTracking().Where(x => x.TenantId == tenantId).ToListAsync(ct);
+        return rows.OrderByDescending(x => x.UpdatedAt).ToList();
     }
 
     public async Task<EvaluationCaseEntity> AddEvaluationCaseAsync(ActorContext actor, Guid tenantId, Guid datasetId, EvaluationCaseCreate request, CancellationToken ct = default)
@@ -269,7 +271,8 @@ public sealed class GovernanceService(
         await tenantAccess.RequireAsync(actor, tenantId, TenantRole.Member, ct);
         var exists = await db.Set<EvaluationDatasetEntity>().AsNoTracking().AnyAsync(x => x.Id == datasetId && x.TenantId == tenantId, ct);
         if (!exists) throw new KeyNotFoundException("Evaluation Dataset 不存在。");
-        return await db.Set<EvaluationCaseEntity>().AsNoTracking().Where(x => x.DatasetId == datasetId).OrderBy(x => x.CreatedAt).ToListAsync(ct);
+        var rows = await db.Set<EvaluationCaseEntity>().AsNoTracking().Where(x => x.DatasetId == datasetId).ToListAsync(ct);
+        return rows.OrderBy(x => x.CreatedAt).ToList();
     }
 
     public async Task<IReadOnlyList<EvaluationRunEntity>> ListEvaluationRunsAsync(ActorContext actor, Guid tenantId, Guid? datasetId = null, CancellationToken ct = default)
@@ -278,7 +281,8 @@ public sealed class GovernanceService(
         var datasetIds = db.Set<EvaluationDatasetEntity>().AsNoTracking().Where(x => x.TenantId == tenantId).Select(x => x.Id);
         var query = db.Set<EvaluationRunEntity>().AsNoTracking().Where(x => datasetIds.Contains(x.DatasetId));
         if (datasetId.HasValue) query = query.Where(x => x.DatasetId == datasetId.Value);
-        return await query.OrderByDescending(x => x.CreatedAt).Take(200).ToListAsync(ct);
+        var rows = await query.ToListAsync(ct);
+        return rows.OrderByDescending(x => x.CreatedAt).Take(200).ToList();
     }
 
     public async Task<Guid> ResolveTenantIdAsync(Guid knowledgeBaseId, CancellationToken ct = default)
