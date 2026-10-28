@@ -43,13 +43,16 @@ public static class GovernanceEndpoints
             Results.Ok(await service.SavePromptProfileAsync(HttpActorContext.From(principal), tenantId, request with { Id = promptId }, ct)));
 
         group.MapGet("/webhooks", async (Guid tenantId, ClaimsPrincipal principal, GovernanceService service, CancellationToken ct) =>
-            Results.Ok(await service.ListWebhooksAsync(HttpActorContext.From(principal), tenantId, ct)));
+        {
+            var hooks = await service.ListWebhooksAsync(HttpActorContext.From(principal), tenantId, ct);
+            return Results.Ok(hooks.Select(ToWebhookResponse));
+        });
 
         group.MapPost("/webhooks", async (Guid tenantId, ClaimsPrincipal principal, WebhookUpsert request, GovernanceService service, CancellationToken ct) =>
-            Results.Ok(await service.SaveWebhookAsync(HttpActorContext.From(principal), tenantId, request, ct)));
+            Results.Ok(ToWebhookResponse(await service.SaveWebhookAsync(HttpActorContext.From(principal), tenantId, request, ct))));
 
         group.MapPut("/webhooks/{webhookId:guid}", async (Guid tenantId, Guid webhookId, ClaimsPrincipal principal, WebhookUpsert request, GovernanceService service, CancellationToken ct) =>
-            Results.Ok(await service.SaveWebhookAsync(HttpActorContext.From(principal), tenantId, request with { Id = webhookId }, ct)));
+            Results.Ok(ToWebhookResponse(await service.SaveWebhookAsync(HttpActorContext.From(principal), tenantId, request with { Id = webhookId }, ct))));
 
         group.MapDelete("/webhooks/{webhookId:guid}", async (Guid tenantId, Guid webhookId, ClaimsPrincipal principal, GovernanceService service, CancellationToken ct) =>
         {
@@ -84,4 +87,21 @@ public static class GovernanceEndpoints
 
         return app;
     }
+
+    private static object ToWebhookResponse(WebhookSubscriptionEntity hook) => new
+    {
+        hook.Id,
+        hook.TenantId,
+        hook.Name,
+        hook.Url,
+        hook.EventTypes,
+        hook.IsActive,
+        hook.LastStatusCode,
+        hook.LastError,
+        hook.LastDeliveredAt,
+        hook.CreatedByUserId,
+        hook.CreatedAt,
+        hook.UpdatedAt,
+        hasSecret = !string.IsNullOrWhiteSpace(hook.Secret)
+    };
 }
