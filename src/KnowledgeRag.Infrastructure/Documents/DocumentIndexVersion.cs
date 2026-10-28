@@ -5,26 +5,20 @@ namespace KnowledgeRag.Infrastructure.Documents;
 
 public static class DocumentIndexVersion
 {
-    public static int Next(int currentVersion)
-    {
-        if (currentVersion < 0) throw new ArgumentOutOfRangeException(nameof(currentVersion));
-        return checked(currentVersion + 1);
-    }
-
     /// <summary>
-    /// Produces a stable point id for a document/index generation/chunk tuple. Stable ids make
-    /// retries idempotent: a retried build overwrites any orphaned staging points from the same
-    /// generation instead of creating an unbounded set of unreachable vectors.
+    /// Produces a stable point id for a document/index-generation/chunk tuple. The generation is
+    /// the persisted queue timestamp captured before processing begins. Stable ids make a delivery
+    /// retry idempotent without adding a schema column solely for staging state.
     /// </summary>
-    public static Guid CreatePointId(Guid documentId, int indexVersion, int chunkIndex)
+    public static Guid CreatePointId(Guid documentId, long generationTicks, int chunkIndex)
     {
-        if (indexVersion <= 0) throw new ArgumentOutOfRangeException(nameof(indexVersion));
+        if (generationTicks <= 0) throw new ArgumentOutOfRangeException(nameof(generationTicks));
         if (chunkIndex < 0) throw new ArgumentOutOfRangeException(nameof(chunkIndex));
 
-        Span<byte> input = stackalloc byte[24];
+        Span<byte> input = stackalloc byte[28];
         documentId.TryWriteBytes(input[..16]);
-        BinaryPrimitives.WriteInt32LittleEndian(input[16..20], indexVersion);
-        BinaryPrimitives.WriteInt32LittleEndian(input[20..24], chunkIndex);
+        BinaryPrimitives.WriteInt64LittleEndian(input[16..24], generationTicks);
+        BinaryPrimitives.WriteInt32LittleEndian(input[24..28], chunkIndex);
 
         Span<byte> hash = stackalloc byte[32];
         SHA256.HashData(input, hash);
