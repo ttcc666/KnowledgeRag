@@ -109,9 +109,9 @@ public sealed class EvaluationService(
                 summary.NoAnswerAccuracy,
                 run.AverageLatencyMs,
                 baselineRunId = baselineSnapshot?.RunId,
-                comparison?.PassRateRegression,
-                comparison?.GroundednessRegression,
-                comparison?.LatencyRegression
+                passRateRegression = comparison?.PassRateRegression,
+                groundednessRegression = comparison?.GroundednessRegression,
+                latencyRegression = comparison?.LatencyRegression
             }, ct);
             return run;
         }
