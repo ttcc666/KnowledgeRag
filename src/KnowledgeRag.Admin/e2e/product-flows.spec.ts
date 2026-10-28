@@ -100,7 +100,8 @@ test('assistant-ui chat shows validated inline citations, workflow progress and 
   await composer.fill('What is the policy?')
   await page.getByRole('button', { name: '发送消息' }).click()
   await expect(page.getByText('policy', { exact: true }).last()).toBeVisible()
-  await expect(page.getByRole('button', { name: /查看引用 1: handbook\.pdf/ })).toBeVisible()
+  const inlineCitation = page.getByRole('paragraph').getByRole('button', { name: '查看引用 1: handbook.pdf' })
+  await expect(inlineCitation).toBeVisible()
   await expect(page.getByText('Grounded in the handbook')).toBeVisible()
   await expect(page.getByRole('region', { name: 'Agent 执行过程' })).toBeVisible()
   await page.getByRole('button', { name: /执行过程/ }).click()
@@ -116,7 +117,7 @@ test('assistant-ui chat shows validated inline citations, workflow progress and 
   expect(documentScrolls).toBeFalsy()
   await expect(composer).toBeInViewport()
 
-  await page.getByRole('button', { name: /查看引用 1: handbook\.pdf/ }).click()
+  await inlineCitation.click()
   await expect(page.getByText('Employees receive the documented benefit.', { exact: false }).last()).toBeVisible()
 
   const activeSource = isDesktop
