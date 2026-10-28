@@ -49,12 +49,24 @@ public sealed class ConversationService(AppDbContext db, KnowledgeBaseAccessServ
     }
 
     public async Task<ChatResponse> SendAsync(ActorContext actor, Guid conversationId, string message, CancellationToken cancellationToken = default)
-        => await ExecuteTurnAsync(actor, conversationId, message, null, cancellationToken);
+        => await ExecuteTurnAsync(actor, conversationId, message, null, null, cancellationToken);
 
-    public async Task<ChatResponse> StreamAsync(ActorContext actor, Guid conversationId, string message, Func<string, CancellationToken, Task> onDelta, CancellationToken cancellationToken = default)
-        => await ExecuteTurnAsync(actor, conversationId, message, onDelta, cancellationToken);
+    public async Task<ChatResponse> StreamAsync(
+        ActorContext actor,
+        Guid conversationId,
+        string message,
+        Func<string, CancellationToken, Task> onDelta,
+        Func<RagProgressEvent, CancellationToken, Task>? onProgress = null,
+        CancellationToken cancellationToken = default)
+        => await ExecuteTurnAsync(actor, conversationId, message, onDelta, onProgress, cancellationToken);
 
-    private async Task<ChatResponse> ExecuteTurnAsync(ActorContext actor, Guid conversationId, string message, Func<string, CancellationToken, Task>? onDelta, CancellationToken cancellationToken)
+    private async Task<ChatResponse> ExecuteTurnAsync(
+        ActorContext actor,
+        Guid conversationId,
+        string message,
+        Func<string, CancellationToken, Task>? onDelta,
+        Func<RagProgressEvent, CancellationToken, Task>? onProgress,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(message)) throw new InvalidOperationException("消息不能为空。");
         var gate = Locks.GetOrAdd(conversationId, _ => new SemaphoreSlim(1, 1));
@@ -65,7 +77,7 @@ public sealed class ConversationService(AppDbContext db, KnowledgeBaseAccessServ
             await access.RequireAsync(actor, conversation.KnowledgeBaseId, KnowledgeBaseRole.Viewer, cancellationToken);
             var result = onDelta is null
                 ? await agent.AskAsync(conversation.KnowledgeBaseId, message, conversation.AgentSessionJson, cancellationToken)
-                : await agent.StreamAsync(conversation.KnowledgeBaseId, message, conversation.AgentSessionJson, onDelta, cancellationToken);
+                : await agent.StreamAsync(conversation.KnowledgeBaseId, message, conversation.AgentSessionJson, onDelta, onProgress, cancellationToken);
             var now = DateTimeOffset.UtcNow;
             if (conversation.Title == "新会话") conversation.Title = message.Length <= 40 ? message : message[..40] + "…";
             conversation.AgentSessionJson = result.SessionJson;
