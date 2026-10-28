@@ -1,0 +1,62 @@
+name: chat-turn-patch
+
+on:
+  push:
+    branches:
+      - fix/chat-turn-workflow-citations
+    paths:
+      - .github/workflows/chat-turn-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/chat-turn-workflow-citations
+      - name: Patch workflow summary and E2E synchronization
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          chat = Path('src/KnowledgeRag.Admin/src/features/chat/chat-page.tsx')
+          text = chat.read_text()
+          old = "  const active = [...events].reverse().find((event) => event.status === 'running') || events[events.length - 1]"
+          new = "  const active = running\n    ? [...events].reverse().find((event) => event.status === 'running') || events[events.length - 1]\n    : events[events.length - 1]"
+          if old not in text:
+              raise SystemExit('chat active-event marker not found')
+          chat.write_text(text.replace(old, new, 1))
+
+          e2e = Path('src/KnowledgeRag.Admin/e2e/product-flows.spec.ts')
+          text = e2e.read_text()
+          old = """  const renameRequest = page.waitForRequest((request) => request.url().endsWith('/api/conversations/c1') && request.method() === 'PATCH')
+          await renameInput.press('Enter')
+          await renameRequest
+"""
+          new = """  const renameRequest = page.waitForRequest((request) => request.url().endsWith('/api/conversations/c1') && request.method() === 'PATCH')
+          const regularRefresh = page.waitForResponse((response) => {
+            const url = new URL(response.url())
+            return response.request().method() === 'GET' && url.pathname === '/api/conversations' && url.searchParams.get('archived') !== 'true'
+          })
+          const archivedRefresh = page.waitForResponse((response) => {
+            const url = new URL(response.url())
+            return response.request().method() === 'GET' && url.pathname === '/api/conversations' && url.searchParams.get('archived') === 'true'
+          })
+          await renameInput.press('Enter')
+          await Promise.all([renameRequest, regularRefresh, archivedRefresh])
+"""
+          if old not in text:
+              raise SystemExit('rename synchronization marker not found')
+          e2e.write_text(text.replace(old, new, 1))
+          PY
+      - name: Remove temporary workflow and commit
+        run: |
+          rm .github/workflows/chat-turn-patch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/KnowledgeRag.Admin/src/features/chat/chat-page.tsx src/KnowledgeRag.Admin/e2e/product-flows.spec.ts .github/workflows/chat-turn-patch.yml
+          git commit -m "fix(chat): finalize workflow summary and browser synchronization"
+          git push origin HEAD:fix/chat-turn-workflow-citations
