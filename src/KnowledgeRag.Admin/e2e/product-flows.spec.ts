@@ -115,7 +115,7 @@ test('official assistant-ui Thread renders chat, sources, feedback and Knowledge
   await expect(page.getByText('证据审核通过')).toBeVisible()
 
   const feedbackRequest = page.waitForRequest((request) => request.url().endsWith('/api/conversations/c1/messages/m2/feedback'))
-  await page.getByRole('button', { name: 'Helpful' }).click()
+  await page.getByRole('button', { name: 'Helpful', exact: true }).click()
   await feedbackRequest
 
   const documentScrolls = await page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight + 2)
@@ -164,7 +164,7 @@ test('official assistant-ui ThreadList can rename, archive and restore a convers
   const renameRequest = page.waitForRequest((request) => request.url().endsWith('/api/conversations/c1') && request.method() === 'PATCH')
   await renameInput.press('Enter')
   await renameRequest
-  await expect(page.getByText('Renamed policy')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Renamed policy', exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: 'More options' }).click()
   const archiveRequest = page.waitForRequest((request) => request.url().endsWith('/api/conversations/c1/archive') && request.method() === 'POST')
@@ -176,5 +176,5 @@ test('official assistant-ui ThreadList can rename, archive and restore a convers
   const restoreRequest = page.waitForRequest((request) => request.url().endsWith('/api/conversations/c1/archive') && request.method() === 'DELETE')
   await page.getByRole('button', { name: '恢复会话' }).click()
   await restoreRequest
-  await expect(page.getByText('Renamed policy')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Renamed policy', exact: true })).toBeVisible()
 })
