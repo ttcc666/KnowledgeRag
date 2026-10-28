@@ -1,6 +1,8 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using KnowledgeRag.Infrastructure.Governance;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace KnowledgeRag.Api.IntegrationTests;
@@ -67,6 +69,15 @@ public sealed class GovernanceApiTests : IClassFixture<ApiFactory>
         savePrice.EnsureSuccessStatusCode();
         var prices = await client.GetFromJsonAsync<JsonElement>($"/api/governance/model-prices?tenantId={tenantId}");
         Assert.Contains(prices.EnumerateArray(), x => x.GetProperty("model").GetString() == "answer-test");
+
+        // Regression: SQLite cannot translate ORDER BY DateTimeOffset. Cost estimation must
+        // filter prices in SQL and select the newest price in memory.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var runtimeProfiles = scope.ServiceProvider.GetRequiredService<RagRuntimeProfileService>();
+            var estimatedCost = await runtimeProfiles.EstimateCostAsync(tenantId, "answer-test", 1_000_000, 1_000_000);
+            Assert.Equal(12.5m, estimatedCost);
+        }
 
         var savePrompt = await client.PostAsJsonAsync($"/api/governance/prompts?tenantId={tenantId}", new
         {
