@@ -1,6 +1,52 @@
 # Validation
 
-本轮增加：
+## 当前 Unreleased — RAG Production Readiness v3
+
+本轮新增 / 调整的验证重点：
+
+- Final Answer Citation Gate：有效 `[E#]` 归一化、非法 Evidence ID fail-closed、知识型无引用回答 fail-closed、no-answer abstention、非知识回答。
+- Reviewer 之后、SSE / DB 之前执行统一 Citation validation，客户端不再接收未经最终 Citation Gate 的模型文本。
+- RAG Profile 在同一 scoped request 内解析为单一 execution snapshot，Reservation / Agent / Evaluation 使用同一模型与策略快照。
+- Multi-query 原始查询保持 mandatory，Planner 扩展查询改为 best-effort；扩展查询失败不会拖垮仍有原始检索结果的整轮。
+- Evidence context 增加总 token budget 与单文档 token budget，按最终排序确定性截断。
+- Reviewer repair 的跨轮 Evidence merge 不直接比较 round-local reranker score，改用合并后的 fusion 归一化排序。
+- Evaluation v3 增加 expected source labels、Hit Rate、Recall@K、MRR、nDCG，并与 citation / grounding / no-answer 分层统计。
+- 消息历史增加 bounded server pagination；SQLite 使用 `julianday(CreatedAt)` 在数据库内完成时间比较 / 排序，PostgreSQL 使用正常 server-side `ORDER BY / LIMIT`。
+- assistant-ui External Store Runtime 增加 `hasEarlier / onLoadEarlier`、Feedback Adapter、Thread List Adapter、rename / archive / restore / delete。
+- Chat 继续保持 Thread、Conversations、Source Panel 独立滚动，未恢复 browser global scrolling。
+- Chat 的受限富文本渲染只处理文本结构 / code fence / trusted `[n]` citation，不解析 raw HTML，不展示 Chain of Thought。
+- Playwright product flow 更新为分页消息 API，并覆盖 inline citation、Source Panel、feedback、rename、archive / restore。
+
+新增 C# deterministic regression tests：
+
+```text
+FinalAnswerPolicyTests
+EvaluationRetrievalScoringTests
+RagWorkflowPolicyTests (cross-round merge regression)
+```
+
+本轮没有新增 EF Core schema / migration。Conversation archive 使用过滤掉的内部 `__meta` ChatMessage 事件持久化；Feedback 复用现有 Audit Log；Evaluation v3 advanced expectation 使用向后兼容的 versioned envelope 存入现有字段。
+
+## 当前环境限制
+
+当前执行容器无法解析 GitHub / NuGet / NPM 外网 DNS，且没有可用于本仓库的本地 clone，因此本轮不能诚实宣称在容器内执行过完整 CLI build/test。代码通过 GitHub Repository Connector 写入独立分支，最终验证以该分支 **最新 HEAD 对应的真实 GitHub Actions** 为准。
+
+必须由 CI 覆盖：
+
+```bash
+npm run build
+npm run test
+npm run test:e2e
+dotnet restore KnowledgeRag.NonAzure.sln
+dotnet build KnowledgeRag.NonAzure.sln -c Release --no-restore
+dotnet test KnowledgeRag.NonAzure.sln -c Release --no-build
+```
+
+Ready / main 还必须覆盖 SQLite、PostgreSQL、RabbitMQ、CAP、pgvector、PostgreSQL FTS 与 production frontend build。新 commit 触发 concurrency cancel 时，只认最新 HEAD 的 `build-test` / `native-backends-smoke` 和完整 Ready CI。
+
+---
+
+## 项目历史验证基线
 
 - EF Core Migration + design-time DbContext factory
 - Refresh Token rotation/replay detection
@@ -29,24 +75,19 @@
 - CI YAML / OpenTelemetry Collector YAML 解析
 - ExternalBackend 测试源码结构检查
 
-## 当前环境限制
+## 推荐本地验证
 
-当前执行环境没有 `dotnet` SDK 和 Docker，且容器 DNS 无法下载 NuGet/NPM 依赖，因此本环境仍无法实际执行完整 restore/build：
-
-```bash
-dotnet restore
-dotnet build
-dotnet test
-cd src/KnowledgeRag.Admin && npm install && npm run build
-docker compose up
-```
-
-项目已经加入集成测试；请在具有 .NET 10 SDK 的开发机或 CI 中首先执行：
+在具备 .NET 10 SDK、Node 22、Docker 与网络依赖的环境执行：
 
 ```bash
 dotnet restore KnowledgeRag.NonAzure.sln
 dotnet build KnowledgeRag.NonAzure.sln -c Release --no-restore
 dotnet test KnowledgeRag.NonAzure.sln -c Release --no-build
+cd src/KnowledgeRag.Admin
+npm ci
+npm run build
+npm run test
+npm run test:e2e
 ```
 
 随后分别验证两套推荐组合：
@@ -66,20 +107,17 @@ docker compose --profile s3 up -d --build
 
 ## shadcn-admin 前端改造验证
 
-已新增独立 `src/KnowledgeRag.Admin`，并完成：
+`src/KnowledgeRag.Admin` 已完成：
 
-- `package.json` / `tsconfig.json` / `components.json` JSON 解析通过
-- Docker Compose / GitHub Actions / OTel Collector YAML 解析通过
-- `.ts/.tsx` 全量 TypeScript parser syntax diagnostics：0
-- Dockerfile 已确认包含 Node 22 frontend stage、`npm run build`、`dist -> wwwroot` 复制
-- CI 已确认包含 Node 22 setup 与 frontend build step
-- 旧 `wwwroot` 单文件 demo 的主要标记已移除；源码中的 `index.html` 仅保留“未构建前端”的开发提示页
-
-当前容器无法解析外网 NPM registry，因此无法在本环境执行真实 `npm install && npm run build`。GitHub Actions 与 Dockerfile 已配置真实前端构建，请在可联网环境首次运行 CI/Docker build 时完成依赖级类型检查和 Vite bundle 验证。
+- `package.json` / `tsconfig.json` / `components.json` JSON 解析基线。
+- Docker Compose / GitHub Actions / OTel Collector YAML 解析基线。
+- Dockerfile 包含 Node 22 frontend stage、`npm run build`、`dist -> wwwroot` 复制。
+- CI 包含 Node 22 setup 与 frontend build step。
+- Chat 使用 assistant-ui External Store Runtime，同时由应用自己的 API / TanStack Query 保存会话与消息。
 
 ## 后端目录 / 架构重构验证
 
-本轮将原先集中在 `KnowledgeRag.Api` 中的后端代码拆分为：
+后端结构保持：
 
 ```text
 KnowledgeRag.Domain
@@ -88,23 +126,15 @@ KnowledgeRag.Infrastructure
 KnowledgeRag.Api
 ```
 
-并完成以下检查：
+架构约束：
 
-- Solution 已包含 Domain / Application / Infrastructure / Api / IntegrationTests 5 个 C# 项目。
+- Solution 包含 Domain / Application / Infrastructure / Api / IntegrationTests。
 - 所有 C# 项目继续使用 `net10.0`。
 - Domain 无本解决方案内部项目依赖。
-- Application 只引用 Domain；源码中无 Infrastructure / Api 反向引用。
-- Infrastructure 只引用 Application + Domain；源码中无 Api 引用。
-- Api 中无 `AppDbContext` / `Microsoft.EntityFrameworkCore` 直接访问。
-- 旧 `KnowledgeRag.Api/Data`、`Models`、`Options`、`Services`、`Migrations` 已清理。
-- EF Core migrations 已迁移到 `KnowledgeRag.Infrastructure/Persistence/Migrations`。
-- `Program.cs` 已收敛为 composition root；业务 Endpoint 全部拆到 `KnowledgeRag.Api/Endpoints`。
-- Infrastructure DI 已按 Persistence / Identity / Tenancy / KnowledgeBases / Documents / AI / Storage / Search / Conversations 模块拆分。
-- Dockerfile restore 阶段已显式复制 Domain / Application / Infrastructure / Api 四个项目文件。
-- IntegrationTests 已更新到新的 Domain / Application / Infrastructure namespaces。
-- 86 个 C# 文件完成字符串/注释感知的括号结构扫描：0 个结构错误。
-- 5 个 `.csproj` 完成 XML 解析：通过。
-- 所有 `using KnowledgeRag.*` 内部 namespace 引用均能对应当前源码 namespace：0 个缺失。
-- Layer rule 扫描：0 个反向依赖违规。
+- Application 只引用 Domain。
+- Infrastructure 只引用 Application + Domain。
+- Api 保持 composition / endpoint 边界，不把检索、Agent、Persistence 逻辑重新堆回 Endpoint。
+- EF Core migrations 位于 `KnowledgeRag.Infrastructure/Persistence/Migrations`。
+- 搜索、Conversation、Governance 等模块继续通过 Infrastructure DI 注册。
 
-开发约定详见根目录 `ARCHITECTURE.md`。
+开发约定详见根目录 `ARCHITECTURE.md` 与 `DEVELOPMENT_WORKFLOW.md`。

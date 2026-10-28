@@ -18,6 +18,15 @@
 
 ### Added
 
+- 新增 **Final Answer Citation Gate**：Agent / Reviewer 完成后、SSE 与持久化之前统一执行确定性 Citation normalize/validation；非法 Evidence ID、知识型无有效引用回答均 fail-closed，只向前端暴露答案实际引用的可信 Sources。
+- 新增 **Evidence Context Budget**：RAG 增加总 Evidence token budget 与单文档 token budget，按最终排序确定性截断上下文，限制 Multi-query / Repair 造成的上下文与成本膨胀。
+- 新增 **Evaluation v3 Retrieval Metrics**：Case 可选标注 expected source（文件名 + 可选 chunk），确定性计算 Hit Rate、Recall@K、MRR、nDCG；`ResultsJson` 升级为 `schemaVersion=3` / `evaluatorVersion=retrieval-citation-v3`，并将检索指标写入 Case、分类汇总和 `evaluation.completed` webhook 元数据。
+- 新增 Evaluation v3 向后兼容 expectation codec：旧 `ExpectedAnswerContains` 纯文本继续可用；配置 expected source 时使用 versioned envelope 存入现有字段，不新增数据库 Migration。
+- 新增 **Chat 消息分页**：提供 bounded message page API；assistant-ui External Store Runtime 使用 `hasEarlier / onLoadEarlier` 加载更早消息，避免长会话一次性 materialize 全部消息。
+- 新增 **assistant-ui Thread Actions**：Conversation 支持 rename、archive / restore、delete；归档状态通过过滤掉的内部 `__meta` 消息事件持久化，避免本轮引入手工数据库 Migration。
+- 新增 **Answer Feedback**：assistant-ui thumbs up / down 通过 Feedback Adapter 写入现有 Audit Log，关联 Conversation 与 Assistant Message。
+- 新增 Chat **trusted inline citation**：只有服务端 `sourcesByMessageId` 中真实存在的 `[n]` 才渲染为可点击 Citation；点击后继续打开现有 Source Panel。
+- 新增 Final Answer Policy、Evaluation Retrieval Metrics、跨轮 Evidence merge 确定性回归测试，以及 Chat inline Citation / Feedback / Thread Actions Playwright 覆盖。
 - 新增 **统一通信渠道适配层**：Webhook Automation 支持 Slack、Discord、Microsoft Teams、飞书/Lark、钉钉、企业微信群机器人及自定义 HTTP Webhook；通过平台下拉选择、URL 与可选签名密钥配置完成接入。
 - 新增通信渠道 Provider Catalog API 与平台专属消息格式 / 签名适配；原自定义 JSON、HMAC-SHA256、事件筛选、CAP 异步投递、重试及 SSRF 防护保持兼容。
 - 新增 **Citation-aware Evaluation v2**：Evaluation 与 Chat 共用 Structured Citation Contract，知识型 fact case 只有在答案引用当前 Evidence 且引用 ID 合法时才算 grounded，不再把“检索到了 Source”直接等价为“回答有依据”。
@@ -35,6 +44,14 @@
 
 ### Changed
 
+- RAG Profile 在同一 scoped request 内只解析一次 execution snapshot；Budget Reservation、Agent 执行与 Evaluation 使用一致的模型、Prompt、检索和 Reviewer 配置，避免并发配置修改造成预留与实际执行快照不一致。
+- Multi-query Retrieval 将原始用户查询保持为 mandatory，Planner 生成的扩展查询改为 best-effort；可选扩展查询失败会记录失败但不再拖垮仍有原始检索结果的整轮。
+- Reviewer Repair 的跨轮 Evidence merge 不再直接比较 round-local reranker score，改为合并后按 fusion evidence 归一化排序并确定性去重。
+- Chat answer text 改为 correctness-first buffering：Agent Workflow Timeline 继续实时 SSE，但最终回答只有在 Reviewer / Repair 完成并通过 Citation Gate 后才以最终 delta 发给客户端；不再暴露原始 `[E#]` 或之后会被剥除的非法引用。
+- assistant-ui External Store Runtime 现在同时管理 Thread 与 Thread List adapter；Conversation sidebar 使用 `ThreadListPrimitive`，保留 TanStack Query / 服务端作为消息与会话事实源。
+- Chat 富文本改为受限 renderer：支持标题、列表、粗体和 code fence，但不解析 raw HTML / 任意链接；仍明确不展示 Chain of Thought。
+- SQLite 长会话分页使用 `julianday(CreatedAt)` 在数据库内比较 / 排序并保持 page limit；PostgreSQL 使用 server-side `ORDER BY / LIMIT`，不为了 Provider 兼容拉取整段会话到内存。
+- 取消 / 失败的 Chat streaming 会清理 optimistic user/assistant 临时消息，避免 UI 留下刷新后消失的 ghost turn。
 - Webhook Automation 的内置通信渠道从统一纯文本升级为 **平台原生富消息**：Slack 使用 Block Kit、Discord 使用 Embed、Microsoft Teams 使用 Adaptive Card、飞书/Lark 使用 Interactive Card、钉钉与企业微信使用原生 Markdown；事件语义与指标保持一致，自定义 HTTP Webhook 继续发送原始 JSON 事件信封与 HMAC-SHA256 签名。
 - Evaluation grounding 从“`response.Sources.Count > 0` 或证据不足”升级为确定性 citation-aware 规则：可回答的知识型 Case 必须具备有效 Evidence Citation；`no-answer` Case 则必须正确 abstain 且不得伪造引用。
 - Evaluation 每次运行固定解析一次 RAG Profile，并只持久化 Planner/Reviewer 开关、检索参数、模型 ID、Agent mode 与 PromptProfileId；不持久化 managed prompt 正文。完成 Run 会与同 Dataset 上一次 completed Run 比较 pass rate、groundedness 与 latency（延迟回归阈值为 +20%）。
@@ -56,6 +73,12 @@
 
 ### Fixed
 
+- 修复 Reviewer 已通过但答案仍可能在 Citation normalize 之前通过 SSE 暂时显示 raw `[E#]` / 越界引用的问题；客户端现在只收到最终 Citation Gate 处理后的答案。
+- 修复 Chat 在 `InvalidCitationCount > 0` 或知识型回答没有有效 Citation 时仍可能保存正文的问题；Final Answer Citation Gate 现在 fail-closed 为安全证据不足响应且不暴露可信 Source。
+- 修复 Budget Reservation 与 Agent 分别解析 KB Profile，导致并发配置更新时两者可能使用不同 execution snapshot 的一致性风险。
+- 修复 Planner 某个可选 query 检索失败时 `Task.WhenAll` 使整轮 Multi-query Retrieval 失败的问题；原始用户 query 仍为强制路径。
+- 修复长 Conversation 消息 API 一次性加载全部消息后在内存排序的问题；新增 bounded page API 并接入 assistant-ui earlier-message loading。
+- 修复 Chat 取消 / 异常后 optimistic 临时消息可能残留、刷新后消失的问题。
 - 修复启用系统/环境 HTTP(S) 代理（例如 Clash、v2rayN 的本机代理）时，Webhook `ConnectCallback` 收到 `127.0.0.1` 等代理端点并被 SSRF 策略误判的问题；Webhook 专用 HTTP handler 现在不继承 ambient proxy，直接对实际目标域名执行公网 DNS 校验与连接。
 - 修复 Slack、Discord、Microsoft Teams、飞书/Lark、钉钉和企业微信等通信渠道把 Webhook payload 直接 Pretty-print 为 JSON 的问题；`webhook.test`、`rag.run.completed`、`evaluation.completed` 现在输出面向人的摘要、指标、耗时、成本与明确 UTC 时间，未知事件降级为精简键值摘要，自定义 HTTP Webhook 的原始 JSON 契约保持不变。
 - 修复 SQLite BM25 corpus 查询对 `DocumentChunk.CreatedAt`（`DateTimeOffset`）直接执行数据库端 `ORDER BY` 时可能抛出 `NotSupportedException` 的问题；SQLite 路径改用 `julianday(CreatedAt)` 在数据库内完成时间归一化排序并保持 `Bm25MaxCorpusChunks` 上限，同时新增真实 SQLite BM25 回归测试。
@@ -69,6 +92,8 @@
 
 ### Security
 
+- 最终回答的 Citation validation 现在位于用户可见 SSE / 持久化之前；Reviewer 通过不再等价于 Citation Contract 自动通过，两个保护层独立 fail-closed。
+- Chat 受限富文本 renderer 不执行 raw HTML，也不会把不存在于服务端可信 Source 集合的 `[n]` 变成可交互 Citation；Agent Timeline 继续只展示结构化 stage / tool / status / elapsed 信息，不展示 Chain of Thought。
 - Webhook SSRF 专用连接客户端显式禁用继承的系统/环境代理，避免代理改变 `ConnectCallback` 的连接端点并混淆实际目标 DNS 校验；localhost、私网、link-local、multicast 等受限地址规则保持严格不变。
 - 通信渠道富消息对平台 markup 做安全转义；Discord 显式禁用自动 mentions，避免未知事件字段意外触发 `@everyone` / `@here` 等群体提醒。
 - Evaluation Profile snapshot 明确排除 Planner / Answer / Reviewer managed prompt 正文，只保存非敏感运行配置与标识；评测详情同样不保存 chain-of-thought 或 secret。

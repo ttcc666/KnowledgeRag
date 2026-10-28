@@ -1,14 +1,12 @@
-import { useCallback, useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import {
   ActionBarPrimitive,
-  AssistantRuntimeProvider,
   AuiIf,
   ComposerPrimitive,
   MessagePartPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
   useAui,
-  useExternalStoreRuntime,
 } from '@assistant-ui/react'
 import {
   AlertCircle,
@@ -23,91 +21,72 @@ import {
   ShieldCheck,
   Sparkles,
   Square,
+  ThumbsDown,
+  ThumbsUp,
   Wrench,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { ChatMessage, ChatSource, RagProgressEvent } from '@/lib/types'
+import type { ChatSource, RagProgressEvent } from '@/lib/types'
 
 type AssistantThreadProps = {
-  messages: ChatMessage[]
   sourcesByMessageId: Record<string, ChatSource[]>
   isRunning: boolean
   progressEvents: RagProgressEvent[]
   traceMessageId: string
   progressOpen: boolean
   onToggleProgress: () => void
-  onSend: (message: string) => Promise<void>
-  onCancel: () => void
   onSource: (source: ChatSource) => void
 }
 
 export function AssistantThread({
-  messages,
   sourcesByMessageId,
   isRunning,
   progressEvents,
   traceMessageId,
   progressOpen,
   onToggleProgress,
-  onSend,
-  onCancel,
   onSource,
 }: AssistantThreadProps) {
-  const convertMessage = useCallback((message: ChatMessage) => ({
-    id: message.id,
-    role: message.role.toLowerCase() === 'user' ? 'user' as const : 'assistant' as const,
-    content: [{ type: 'text' as const, text: message.content }],
-    createdAt: new Date(message.createdAt),
-  }), [])
-
-  const runtime = useExternalStoreRuntime({
-    messages,
-    isRunning,
-    convertMessage,
-    onNew: async (message) => {
-      const textPart = message.content.find((part) => part.type === 'text')
-      if (!textPart || textPart.type !== 'text' || !textPart.text.trim()) return
-      await onSend(textPart.text)
-    },
-    onCancel: async () => onCancel(),
-  })
-
   return (
-    <AssistantRuntimeProvider runtime={runtime}>
-      <ThreadPrimitive.Root className='flex h-full min-h-0 flex-col'>
-        <ThreadPrimitive.Viewport
-          turnAnchor='top'
-          autoScroll
-          scrollToBottomOnRunStart
-          className='min-h-0 flex-1 overflow-y-auto overscroll-contain bg-gradient-to-b from-muted/10 via-transparent to-transparent px-4 py-5 sm:px-6 lg:px-8'
-        >
-          <div className='mx-auto flex w-full max-w-5xl flex-col gap-7 pb-5'>
-            <AuiIf condition={(state) => state.thread.isEmpty}>
-              <WelcomePrompts />
-            </AuiIf>
+    <ThreadPrimitive.Root className='flex h-full min-h-0 flex-col'>
+      <ThreadPrimitive.Viewport
+        turnAnchor='top'
+        autoScroll
+        scrollToBottomOnRunStart
+        className='min-h-0 flex-1 overflow-y-auto overscroll-contain bg-gradient-to-b from-muted/10 via-transparent to-transparent px-4 py-5 sm:px-6 lg:px-8'
+      >
+        <div className='mx-auto flex w-full max-w-5xl flex-col gap-7 pb-5'>
+          <AuiIf condition={(state) => state.thread.isEmpty}>
+            <WelcomePrompts />
+          </AuiIf>
 
-            <ThreadPrimitive.Messages>
-              {({ message }) => message.role === 'user'
-                ? <UserMessage />
-                : <AssistantMessage
-                    messageId={message.id}
-                    sources={sourcesByMessageId[message.id] || []}
-                    onSource={onSource}
-                    progressEvents={progressEvents}
-                    showProgress={message.id === traceMessageId}
-                    progressOpen={progressOpen}
-                    onToggleProgress={onToggleProgress}
-                    running={isRunning && message.id === traceMessageId}
-                  />}
-            </ThreadPrimitive.Messages>
+          <AuiIf condition={(state) => state.thread.hasEarlier || state.thread.isLoadingEarlier}>
+            <ThreadPrimitive.LoadEarlier className='mx-auto rounded-full border bg-background px-3 py-1.5 text-[11px] text-muted-foreground shadow-sm transition hover:bg-accent disabled:opacity-60'>
+              加载更早消息
+            </ThreadPrimitive.LoadEarlier>
+          </AuiIf>
 
-            <ThreadPrimitive.ViewportFooter className='sticky bottom-0 z-10 pt-4'>
-              <ChatComposer />
-            </ThreadPrimitive.ViewportFooter>
-          </div>
-        </ThreadPrimitive.Viewport>
-      </ThreadPrimitive.Root>
-    </AssistantRuntimeProvider>
+          <ThreadPrimitive.Messages>
+            {({ message }) => message.role === 'user'
+              ? <UserMessage />
+              : <AssistantMessage
+                  messageId={message.id}
+                  sources={sourcesByMessageId[message.id] || []}
+                  onSource={onSource}
+                  progressEvents={progressEvents}
+                  showProgress={message.id === traceMessageId}
+                  progressOpen={progressOpen}
+                  onToggleProgress={onToggleProgress}
+                  running={isRunning && message.id === traceMessageId}
+                />}
+          </ThreadPrimitive.Messages>
+
+          <ThreadPrimitive.ViewportFooter className='sticky bottom-0 z-10 pt-4'>
+            <ChatComposer />
+          </ThreadPrimitive.ViewportFooter>
+        </div>
+      </ThreadPrimitive.Viewport>
+    </ThreadPrimitive.Root>
   )
 }
 
@@ -121,15 +100,10 @@ function WelcomePrompts() {
           <Sparkles className='size-6' />
         </div>
         <h2 className='text-xl font-semibold tracking-tight sm:text-2xl'>从知识库开始探索</h2>
-        <p className='mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground'>回答会附带来源证据。执行时可展开 Agent 过程，查看规划、检索、子 Agent 调用和证据审核状态。</p>
+        <p className='mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground'>回答会经过服务端 Evidence 与 Citation Gate 验证。执行时可展开 Agent 过程，查看规划、检索、子 Agent 调用和证据审核状态。</p>
         <div className='mt-6 flex flex-wrap justify-center gap-2'>
           {prompts.map((prompt) => (
-            <button
-              key={prompt}
-              type='button'
-              onClick={() => aui.composer().setText(prompt)}
-              className='rounded-full border bg-background px-4 py-2 text-xs text-muted-foreground shadow-sm transition hover:border-primary/30 hover:bg-primary/5 hover:text-foreground'
-            >
+            <button key={prompt} type='button' onClick={() => aui.composer().setText(prompt)} className='rounded-full border bg-background px-4 py-2 text-xs text-muted-foreground shadow-sm transition hover:border-primary/30 hover:bg-primary/5 hover:text-foreground'>
               {prompt}
             </button>
           ))}
@@ -211,7 +185,7 @@ function AssistantMessage({
         <div className='max-w-[960px] text-sm leading-7 sm:text-[14px]'>
           <MessagePrimitive.Parts>
             {({ part }) => part.type === 'text'
-              ? <div className='whitespace-pre-wrap break-words'><MessagePartPrimitive.Text /><MessagePartPrimitive.InProgress><span className='ml-1 inline-block h-4 w-0.5 animate-pulse bg-primary align-middle' /></MessagePartPrimitive.InProgress></div>
+              ? <div className='break-words'><GroundedText text={part.text} sources={sources} onSource={onSource} /><MessagePartPrimitive.InProgress><span className='ml-1 inline-block h-4 w-0.5 animate-pulse bg-primary align-middle' /></MessagePartPrimitive.InProgress></div>
               : part.type === 'tool-call' ? part.toolUI : null}
           </MessagePrimitive.Parts>
         </div>
@@ -246,16 +220,79 @@ function AssistantMessage({
             <Copy className='size-3.5 group-data-[copied]/copy:hidden' />
             <Check className='hidden size-3.5 text-emerald-600 group-data-[copied]/copy:block' />
           </ActionBarPrimitive.Copy>
+          <ActionBarPrimitive.FeedbackPositive aria-label='回答有帮助' className='rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground data-[submitted]:text-emerald-600'>
+            <ThumbsUp className='size-3.5' />
+          </ActionBarPrimitive.FeedbackPositive>
+          <ActionBarPrimitive.FeedbackNegative aria-label='回答没有帮助' className='rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground data-[submitted]:text-destructive'>
+            <ThumbsDown className='size-3.5' />
+          </ActionBarPrimitive.FeedbackNegative>
         </ActionBarPrimitive.Root>
       </div>
     </MessagePrimitive.Root>
   )
 }
 
+function GroundedText({ text, sources, onSource }: { text: string; sources: ChatSource[]; onSource: (source: ChatSource) => void }) {
+  const segments = useMemo(() => text.split('```'), [text])
+  return <div className='space-y-2'>
+    {segments.map((segment, segmentIndex) => {
+      if (segmentIndex % 2 === 1) {
+        const lines = segment.replace(/^\n/, '').split('\n')
+        const maybeLanguage = lines[0]?.trim() || ''
+        const hasLanguage = /^[a-z0-9+#._-]{1,24}$/i.test(maybeLanguage) && lines.length > 1
+        const code = (hasLanguage ? lines.slice(1) : lines).join('\n').trimEnd()
+        return <pre key={segmentIndex} className='overflow-x-auto rounded-xl border bg-muted/55 p-3 text-xs leading-5'><code>{code}</code></pre>
+      }
+      return <div key={segmentIndex} className='space-y-1.5'>{renderMarkdownLines(segment, sources, onSource, segmentIndex)}</div>
+    })}
+  </div>
+}
+
+function renderMarkdownLines(text: string, sources: ChatSource[], onSource: (source: ChatSource) => void, keyPrefix: number) {
+  return text.split('\n').map((line, index) => {
+    const key = `${keyPrefix}-${index}`
+    if (!line.trim()) return <div key={key} className='h-1.5' />
+    if (line.startsWith('### ')) return <h4 key={key} className='pt-1 text-sm font-semibold'>{renderInline(line.slice(4), sources, onSource)}</h4>
+    if (line.startsWith('## ')) return <h3 key={key} className='pt-1 text-base font-semibold'>{renderInline(line.slice(3), sources, onSource)}</h3>
+    if (line.startsWith('# ')) return <h2 key={key} className='pt-1 text-lg font-semibold'>{renderInline(line.slice(2), sources, onSource)}</h2>
+    if (/^[-*] /.test(line)) return <div key={key} className='flex gap-2 pl-1'><span aria-hidden='true'>•</span><span>{renderInline(line.slice(2), sources, onSource)}</span></div>
+    const ordered = line.match(/^(\d+)\.\s+(.*)$/)
+    if (ordered) return <div key={key} className='flex gap-2 pl-1'><span className='min-w-5 tabular-nums text-muted-foreground'>{ordered[1]}.</span><span>{renderInline(ordered[2], sources, onSource)}</span></div>
+    return <p key={key}>{renderInline(line, sources, onSource)}</p>
+  })
+}
+
+function renderInline(text: string, sources: ChatSource[], onSource: (source: ChatSource) => void): ReactNode[] {
+  const nodes: ReactNode[] = []
+  const token = /(\[(\d{1,3})\]|\*\*([^*]+)\*\*)/g
+  let cursor = 0
+  let match: RegExpExecArray | null
+  while ((match = token.exec(text)) !== null) {
+    if (match.index > cursor) nodes.push(text.slice(cursor, match.index))
+    if (match[2]) {
+      const citation = Number(match[2])
+      const source = citation >= 1 && citation <= sources.length ? sources[citation - 1] : undefined
+      nodes.push(source
+        ? <button key={`citation-${match.index}`} type='button' onClick={() => onSource(source)} className='mx-0.5 inline-flex rounded-md border border-primary/20 bg-primary/5 px-1.5 py-0.5 align-baseline text-[11px] font-semibold leading-none text-primary hover:bg-primary/10' aria-label={`查看引用 ${citation}: ${source.fileName}`}>[{citation}]</button>
+        : match[0])
+    } else if (match[3]) {
+      nodes.push(<strong key={`strong-${match.index}`} className='font-semibold'>{match[3]}</strong>)
+    }
+    cursor = match.index + match[0].length
+  }
+  if (cursor < text.length) nodes.push(text.slice(cursor))
+  return nodes
+}
+
 function ExecutionTimeline({ events, open, onToggle, running }: { events: RagProgressEvent[]; open: boolean; onToggle: () => void; running: boolean }) {
   const workflow = events.find((event) => event.stepId === 'workflow')
+  const queryDone = events.filter((event) => event.type === 'query.completed').length
+  const retrieval = [...events].reverse().find((event) => event.stage === 'retrieval' && event.status === 'completed')
+  const evidenceCount = typeof retrieval?.data?.evidenceCount === 'number' ? retrieval.data.evidenceCount : typeof retrieval?.data?.mergedEvidenceCount === 'number' ? retrieval.data.mergedEvidenceCount : undefined
+  const review = [...events].reverse().find((event) => event.stage === 'review' && event.type === 'agent.completed')
   const doneCount = events.filter((event) => ['completed', 'skipped'].includes(event.status)).length
   const statusText = running ? '正在执行' : workflow?.status === 'failed' ? '执行失败' : workflow?.status === 'cancelled' ? '已停止' : '已完成'
+  const compact = [queryDone > 0 ? `${queryDone} 个查询` : null, typeof evidenceCount === 'number' ? `${evidenceCount} 条证据` : null, review ? (review.status === 'completed' ? 'Reviewer 通过' : 'Reviewer 需修复') : null, typeof workflow?.elapsedMs === 'number' ? formatDuration(workflow.elapsedMs) : null].filter(Boolean).join(' · ')
 
   return (
     <section className='mt-4 overflow-hidden rounded-2xl border bg-card/70 shadow-sm' aria-label='Agent 执行过程'>
@@ -265,7 +302,7 @@ function ExecutionTimeline({ events, open, onToggle, running }: { events: RagPro
         </span>
         <span className='min-w-0 flex-1'>
           <span className='flex flex-wrap items-center gap-2 text-xs font-semibold'>执行过程<span className={cn('rounded-full px-2 py-0.5 text-[10px] font-medium', running ? 'bg-primary/8 text-primary' : 'bg-muted text-muted-foreground')}>{statusText}</span></span>
-          <span className='mt-0.5 block text-[10px] text-muted-foreground'>{doneCount} 个步骤完成{typeof workflow?.elapsedMs === 'number' ? ` · 总耗时 ${formatDuration(workflow.elapsedMs)}` : ''}</span>
+          <span className='mt-0.5 block text-[10px] text-muted-foreground'>{compact || `${doneCount} 个步骤完成`}</span>
         </span>
         {open ? <ChevronDown className='size-4 text-muted-foreground' /> : <ChevronRight className='size-4 text-muted-foreground' />}
       </button>

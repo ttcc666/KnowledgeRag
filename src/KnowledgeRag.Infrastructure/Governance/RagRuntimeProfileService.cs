@@ -25,6 +25,11 @@ public sealed record ResolvedRagProfile(
     string? AnswerPrompt,
     string? ReviewerPrompt);
 
+/// <summary>
+/// Resolves an immutable RAG execution snapshot once per scoped request. Conversation budget
+/// reservation, Agent execution and Evaluation therefore observe the exact same model/prompt/policy
+/// values even if an administrator updates the persisted profile concurrently.
+/// </summary>
 public sealed class RagRuntimeProfileService(
     AppDbContext db,
     IOptions<AiOptions> aiOptions,
@@ -32,9 +37,12 @@ public sealed class RagRuntimeProfileService(
 {
     private readonly AiOptions _ai = aiOptions.Value;
     private readonly RagOptions _rag = ragOptions.Value;
+    private readonly Dictionary<Guid, ResolvedRagProfile> _resolved = new();
 
     public async Task<ResolvedRagProfile> ResolveAsync(Guid knowledgeBaseId, CancellationToken ct = default)
     {
+        if (_resolved.TryGetValue(knowledgeBaseId, out var cached)) return cached;
+
         var profile = await db.Set<KnowledgeBaseRagProfileEntity>().AsNoTracking()
             .SingleOrDefaultAsync(x => x.KnowledgeBaseId == knowledgeBaseId, ct);
 
@@ -46,7 +54,7 @@ public sealed class RagRuntimeProfileService(
             .OrderByDescending(x => x.Version)
             .FirstOrDefaultAsync(ct);
 
-        return new ResolvedRagProfile(
+        var resolved = new ResolvedRagProfile(
             profile?.EnablePlanner ?? _rag.EnablePlanner,
             Math.Clamp(profile?.PlannerMaxQueries ?? _rag.PlannerMaxQueries, 1, 6),
             Math.Clamp(profile?.MultiQueryTopK ?? _rag.MultiQueryTopK, 1, 30),
@@ -64,6 +72,9 @@ public sealed class RagRuntimeProfileService(
             NullIfWhiteSpace(prompt?.PlannerPrompt),
             AppendMandatoryPolicy(prompt?.AnswerPrompt, AnswerCitationPolicy),
             AppendMandatoryPolicy(prompt?.ReviewerPrompt, ReviewerCitationPolicy));
+
+        _resolved[knowledgeBaseId] = resolved;
+        return resolved;
     }
 
     public async Task<decimal> EstimateCostAsync(Guid tenantId, string model, int inputTokens, int outputTokens, CancellationToken ct = default)
