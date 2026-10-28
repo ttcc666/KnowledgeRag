@@ -13,6 +13,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@assistant-ui/react": "0.15.31",
     "@hookform/resolvers": "^5.2.2",
     "@microsoft/signalr": "^10.0.0",
     "@radix-ui/react-dialog": "^1.1.15",
