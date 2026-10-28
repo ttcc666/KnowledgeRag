@@ -109,10 +109,13 @@ test('official assistant-ui Thread renders chat, sources, feedback and Knowledge
 
   const workflowToggle = page.getByRole('button', { name: /Agent workflow complete/ })
   await expect(workflowToggle).toBeVisible()
+  await expect(page.getByTestId('run-status-details')).toHaveCount(0)
   await workflowToggle.click()
-  await expect(page.getByText('问题分析完成')).toBeVisible()
-  await expect(page.getByText('检索、融合与重排完成')).toBeVisible()
-  await expect(page.getByText('证据审核通过')).toBeVisible()
+  await expect(page.getByTestId('run-status-details')).toBeVisible()
+  const workflowDetails = page.getByTestId('run-status-details')
+  await expect(workflowDetails.getByText('问题分析完成', { exact: true })).toBeVisible()
+  await expect(workflowDetails.getByText('检索、融合与重排完成', { exact: true })).toBeVisible()
+  await expect(workflowDetails.getByText('证据审核通过', { exact: true })).toBeVisible()
 
   const feedbackRequest = page.waitForRequest((request) => request.url().endsWith('/api/conversations/c1/messages/m2/feedback'))
   await page.getByRole('button', { name: 'Helpful', exact: true }).click()
@@ -164,11 +167,13 @@ test('official assistant-ui ThreadList can rename, archive and restore a convers
   const renameRequest = page.waitForRequest((request) => request.url().endsWith('/api/conversations/c1') && request.method() === 'PATCH')
   await renameInput.press('Enter')
   await renameRequest
-  await expect(page.getByRole('button', { name: 'Renamed policy', exact: true })).toBeVisible()
+  const threadList = page.locator('[data-slot="aui_thread-list-root"]')
+  const renamedThread = threadList.locator('[data-slot="aui_thread-list-item"]').filter({ hasText: 'Renamed policy' })
+  await expect(renamedThread).toBeVisible()
 
-  await page.getByRole('button', { name: 'More options' }).click()
+  await renamedThread.getByRole('button', { name: 'More options' }).click()
   const archiveRequest = page.waitForRequest((request) => request.url().endsWith('/api/conversations/c1/archive') && request.method() === 'POST')
-  await page.getByText('Archive', { exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Archive', exact: true }).click()
   await archiveRequest
   await expect(page.getByText('Archived')).toBeVisible()
   await expect(page.getByRole('button', { name: '恢复会话' })).toBeVisible()

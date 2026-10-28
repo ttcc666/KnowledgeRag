@@ -51,7 +51,7 @@
 
 @media (min-width: 1024px) {
   .chat-workspace[data-conversations='true'][data-source='false'] {
-    grid-template-columns: 232px minmax(0, 1fr);
+    grid-template-columns: 256px minmax(0, 1fr);
   }
 
   .chat-workspace[data-conversations='false'][data-source='true'] {
@@ -59,7 +59,7 @@
   }
 
   .chat-workspace[data-conversations='true'][data-source='true'] {
-    grid-template-columns: 232px minmax(0, 1fr) var(--source-width, 380px);
+    grid-template-columns: 256px minmax(0, 1fr) var(--source-width, 380px);
   }
 
   .chat-workspace[data-conversations='false'][data-source='false'],

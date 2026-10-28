@@ -12,7 +12,7 @@ import { toast } from 'sonner'
 import { Thread } from '@/components/assistant-ui/elements/thread.aui'
 import { ThreadList } from '@/components/assistant-ui/elements/thread-list.aui'
 import { SourceExcerptMarkdown } from './chat-markdown'
-import { flattenMessagePages, resolveRuntimeThreadId } from './chat-runtime-state'
+import { buildOptimisticThreadMessages, flattenMessagePages, resolveRuntimeThreadId } from './chat-runtime-state'
 import { mergeProgressEvent } from './progress-events'
 import { api, getErrorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -78,7 +78,7 @@ export function ChatPage() {
   const [liveAnswer, setLiveAnswer] = useState('')
   const [streaming, setStreaming] = useState(false)
   const [progressEvents, setProgressEvents] = useState<RagProgressEvent[]>([])
-  const [progressOpen, setProgressOpen] = useState(true)
+  const [progressOpen, setProgressOpen] = useState(false)
   const controllerRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
@@ -112,7 +112,7 @@ export function ChatPage() {
     setLiveUser(prompt)
     setLiveAnswer('')
     setProgressEvents([])
-    setProgressOpen(true)
+    setProgressOpen(false)
 
     try {
       await api.conversations.stream(
@@ -146,13 +146,10 @@ export function ChatPage() {
     [messages.data],
   )
 
-  const threadMessages = useMemo<ChatMessage[]>(() => {
-    const history = [...loadedMessages]
-    const now = new Date().toISOString()
-    if (liveUser) history.push({ id: 'live-user', role: 'user', content: liveUser, createdAt: now })
-    if (streaming || liveAnswer) history.push({ id: 'live-assistant', role: 'assistant', content: liveAnswer, createdAt: now })
-    return history
-  }, [loadedMessages, liveUser, liveAnswer, streaming])
+  const threadMessages = useMemo<ChatMessage[]>(
+    () => buildOptimisticThreadMessages(loadedMessages, liveUser, liveAnswer),
+    [loadedMessages, liveUser, liveAnswer],
+  )
 
   const convertMessage = useCallback((message: ChatMessage) => {
     const role = message.role.toLowerCase() === 'user' ? 'user' as const : 'assistant' as const
@@ -276,53 +273,53 @@ export function ChatPage() {
   const latestSources = latestAssistantMessage ? parseSources(latestAssistantMessage) : []
 
   const conversationList = <div className='flex h-full min-h-0 flex-col'>
-    <div className='min-h-0 flex-1 overflow-y-auto p-2'>
+    <div className='min-h-0 flex-1 overflow-y-auto p-3'>
       <ThreadList />
       {(archivedConversations.data?.length || 0) > 0 && <ArchivedThreads disabled={streaming} />}
     </div>
   </div>
 
   return <AssistantRuntimeProvider runtime={runtime}>
-    <div className='flex h-full min-h-0 flex-col gap-2'>
-      <div className='flex min-h-12 shrink-0 items-center gap-2 rounded-2xl border bg-background/78 px-2.5 py-2 shadow-sm backdrop-blur-xl sm:px-3'>
-        <div className='flex min-w-0 flex-1 items-center gap-1.5'>
-          <Button size='icon-sm' variant='ghost' className='lg:hidden' aria-label='打开会话列表' onClick={() => setMobileConversations(true)}><Menu className='size-4' /></Button>
-          <Button size='icon-sm' variant='ghost' className='hidden lg:inline-flex' aria-label={showConversations ? '隐藏会话列表' : '显示会话列表'} onClick={() => setConversationsOpen((current) => !current)}>
-            {showConversations ? <PanelLeftClose className='size-4' /> : <PanelLeftOpen className='size-4' />}
-          </Button>
-          <div className='min-w-0'>
-            <div className='flex items-center gap-2'>
-              <span className='truncate text-sm font-semibold'>与知识对话</span>
-              {focusMode && <span className='hidden rounded-full border bg-primary/5 px-2 py-0.5 text-[9px] font-medium text-primary sm:inline'>Focus</span>}
-              {selectedArchived && <span className='hidden rounded-full border bg-muted px-2 py-0.5 text-[9px] font-medium text-muted-foreground sm:inline'>Archived · 只读</span>}
-              {streaming && <span className='hidden text-[10px] text-primary sm:inline'>● Agent Workflow 执行中</span>}
-            </div>
-            <div className='hidden max-w-[38rem] truncate text-[10px] text-muted-foreground sm:block'>{selectedConversation?.title || '新会话'} · Planner → Hybrid Search → Answer → Evidence Review → Citation Gate</div>
-          </div>
-        </div>
-
-        <div className='flex shrink-0 items-center gap-1'>
-          <div className='w-32 sm:w-44 lg:w-52'><Select value={activeKb} onValueChange={setKbId}><SelectTrigger className='h-8'><SelectValue placeholder='选择知识库' /></SelectTrigger><SelectContent>{kbs.data?.map((kb) => <SelectItem value={kb.id} key={kb.id}>{kb.name}</SelectItem>)}</SelectContent></Select></div>
-          <Button size='icon-sm' variant={showSource ? 'secondary' : 'ghost'} className='hidden lg:inline-flex' aria-label={showSource ? '关闭来源证据' : '打开来源证据'} onClick={() => { if (!showSource && !selectedSource && latestSources.length) setSelectedSource(latestSources[0]); setSourcePanel((current) => !current) }}>
-            {showSource ? <PanelRightClose className='size-4' /> : <PanelRightOpen className='size-4' />}
-          </Button>
-          {latestSources.length > 0 && <Button size='icon-sm' variant='ghost' aria-label='查看来源证据' className='lg:hidden' onClick={() => { if (!selectedSource) setSelectedSource(latestSources[0]); setMobileSource(true) }}><FileText className='size-4' /></Button>}
-          <Button size='icon-sm' variant={focusMode ? 'secondary' : 'ghost'} aria-label={focusMode ? '退出专注模式' : '进入专注模式'} onClick={() => setFocusMode((current) => !current)}>
-            {focusMode ? <Minimize2 className='size-4' /> : <Maximize2 className='size-4' />}
-          </Button>
-        </div>
-      </div>
-
+    <div className='flex h-full min-h-0 flex-col'>
       <div
-        className='chat-workspace grid min-h-0 flex-1 overflow-hidden rounded-2xl border bg-card/70 shadow-sm'
+        className='chat-workspace grid min-h-0 flex-1 overflow-hidden rounded-[1.35rem] border bg-background shadow-sm'
         data-conversations={showConversations ? 'true' : 'false'}
         data-source={showSource ? 'true' : 'false'}
         data-focus={focusMode ? 'true' : 'false'}
         style={{ '--source-width': `${sourceWidth}px` } as CSSProperties}
       >
-        {showConversations && <aside data-testid='conversation-panel' className='hidden border-r bg-muted/12 lg:block'>{conversationList}</aside>}
+        {showConversations && <aside data-testid='conversation-panel' className='hidden border-r bg-muted/[0.18] lg:block'>{conversationList}</aside>}
 
-        <section className='flex min-w-0 flex-col overflow-hidden bg-background/45'>
+        <section className='relative flex min-w-0 flex-col overflow-hidden bg-background'>
+          <header className='flex h-14 shrink-0 items-center gap-2 border-b bg-background/92 px-3 backdrop-blur-xl sm:px-4'>
+            <div className='flex min-w-0 flex-1 items-center gap-2'>
+              <Button size='icon-sm' variant='ghost' className='lg:hidden' aria-label='打开会话列表' onClick={() => setMobileConversations(true)}><Menu className='size-4' /></Button>
+              <Button size='icon-sm' variant='ghost' className='hidden lg:inline-flex' aria-label={showConversations ? '隐藏会话列表' : '显示会话列表'} onClick={() => setConversationsOpen((current) => !current)}>
+                {showConversations ? <PanelLeftClose className='size-4' /> : <PanelLeftOpen className='size-4' />}
+              </Button>
+              <div className='min-w-0'>
+                <div className='flex min-w-0 items-center gap-2'>
+                  <span className='truncate text-sm font-semibold'>{selectedConversation?.title || '新会话'}</span>
+                  {streaming && <span className='hidden items-center gap-1 rounded-full bg-primary/8 px-2 py-0.5 text-[10px] font-medium text-primary sm:inline-flex'><LoaderCircle className='size-3 animate-spin' />运行中</span>}
+                  {selectedArchived && <span className='hidden rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline'>已归档 · 只读</span>}
+                  {focusMode && <span className='hidden rounded-full bg-primary/8 px-2 py-0.5 text-[10px] font-medium text-primary sm:inline'>专注模式</span>}
+                </div>
+                <div className='hidden truncate text-[11px] text-muted-foreground sm:block'>{kbs.data?.find((kb) => kb.id === activeKb)?.name || '知识库'} · Grounded RAG</div>
+              </div>
+            </div>
+
+            <div className='flex shrink-0 items-center gap-1'>
+              <div className='w-32 sm:w-44 lg:w-52'><Select value={activeKb} onValueChange={setKbId}><SelectTrigger className='h-8 rounded-lg bg-muted/25'><SelectValue placeholder='选择知识库' /></SelectTrigger><SelectContent>{kbs.data?.map((kb) => <SelectItem value={kb.id} key={kb.id}>{kb.name}</SelectItem>)}</SelectContent></Select></div>
+              <Button size='icon-sm' variant={showSource ? 'secondary' : 'ghost'} className='hidden lg:inline-flex' aria-label={showSource ? '关闭来源证据' : '打开来源证据'} onClick={() => { if (!showSource && !selectedSource && latestSources.length) setSelectedSource(latestSources[0]); setSourcePanel((current) => !current) }}>
+                {showSource ? <PanelRightClose className='size-4' /> : <PanelRightOpen className='size-4' />}
+              </Button>
+              {latestSources.length > 0 && <Button size='icon-sm' variant='ghost' aria-label='查看来源证据' className='lg:hidden' onClick={() => { if (!selectedSource) setSelectedSource(latestSources[0]); setMobileSource(true) }}><FileText className='size-4' /></Button>}
+              <Button size='icon-sm' variant={focusMode ? 'secondary' : 'ghost'} aria-label={focusMode ? '退出专注模式' : '进入专注模式'} onClick={() => setFocusMode((current) => !current)}>
+                {focusMode ? <Minimize2 className='size-4' /> : <Maximize2 className='size-4' />}
+              </Button>
+            </div>
+          </header>
+
           <RunStatusBar
             events={progressEvents}
             running={streaming}
@@ -334,9 +331,9 @@ export function ChatPage() {
           </div>
         </section>
 
-        {showSource && <aside data-testid='source-panel' className='source-panel relative hidden border-l bg-muted/8 lg:flex'>
+        {showSource && <aside data-testid='source-panel' className='source-panel relative hidden border-l bg-muted/[0.12] lg:flex'>
           <div role='separator' aria-label='调整来源面板宽度' className='absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none hover:bg-primary/10' onPointerDown={beginSourceResize} />
-          <div className='flex h-12 shrink-0 items-center justify-between border-b bg-background/70 px-4'>
+          <div className='flex h-14 shrink-0 items-center justify-between border-b bg-background/88 px-4 backdrop-blur-xl'>
             <div><div className='text-xs font-semibold'>来源证据</div><div className='max-w-64 truncate text-[10px] text-muted-foreground'>{selectedSource ? selectedSource.fileName : '选择一条引用查看证据'}</div></div>
             <Button size='icon-sm' variant='ghost' aria-label='关闭来源证据' onClick={() => setSourcePanel(false)}><X className='size-3.5' /></Button>
           </div>
@@ -379,19 +376,23 @@ function RunStatusBar({ events, running, open, onToggle }: { events: RagProgress
   const evidenceCount = typeof retrieval?.data?.evidenceCount === 'number' ? retrieval.data.evidenceCount : typeof retrieval?.data?.mergedEvidenceCount === 'number' ? retrieval.data.mergedEvidenceCount : undefined
   const review = [...events].reverse().find((event) => event.stage === 'review' && event.type === 'agent.completed')
   const workflow = [...events].reverse().find((event) => event.stepId === 'workflow')
+  const activeEvent = [...events].reverse().find((event) => event.status === 'running') || events[events.length - 1]
   const summary = [queryCount ? `${queryCount} 个查询` : null, evidenceCount != null ? `${evidenceCount} 条证据` : null, review ? `Reviewer ${review.status === 'completed' ? '完成' : review.status}` : null].filter(Boolean).join(' · ')
-  return <div className='shrink-0 border-b bg-background/85 px-3 py-2 backdrop-blur'>
-    <button type='button' onClick={onToggle} className='mx-auto flex w-full max-w-3xl items-center gap-2 rounded-md px-2 py-1 text-left text-xs text-muted-foreground hover:bg-muted/60'>
-      {running ? <LoaderCircle className='size-3.5 animate-spin text-primary' /> : <span className='size-2 rounded-full bg-emerald-500' />}
-      <span className='font-medium text-foreground'>{running ? 'Agent workflow running' : workflow?.status === 'failed' ? 'Agent workflow failed' : 'Agent workflow complete'}</span>
-      <span className='min-w-0 flex-1 truncate'>{summary}</span>
-      <ChevronDown className={cn('size-3.5 transition-transform', open && 'rotate-180')} />
+  const title = running ? 'Agent workflow running' : workflow?.status === 'failed' ? 'Agent workflow failed' : 'Agent workflow complete'
+
+  return <div data-testid='run-status-bar' className='relative z-20 shrink-0 border-b bg-background/88 px-3 py-1.5 backdrop-blur-xl'>
+    <button type='button' aria-expanded={open} onClick={onToggle} className='mx-auto flex h-8 w-full max-w-[50rem] items-center gap-2 rounded-lg px-2.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/60'>
+      {running ? <LoaderCircle className='size-3.5 shrink-0 animate-spin text-primary' /> : <span className={cn('size-2 shrink-0 rounded-full', workflow?.status === 'failed' ? 'bg-destructive' : 'bg-emerald-500')} />}
+      <span className='shrink-0 font-medium text-foreground'>{title}</span>
+      <span className='min-w-0 flex-1 truncate'>{activeEvent?.label || summary}</span>
+      {summary && <span className='hidden shrink-0 text-[10px] text-muted-foreground/80 md:inline'>{summary}</span>}
+      <ChevronDown className={cn('size-3.5 shrink-0 transition-transform', open && 'rotate-180')} />
     </button>
-    {open && <div className='mx-auto mt-1 max-h-40 w-full max-w-3xl overflow-y-auto rounded-md border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground'>
-      {events.map((event, index) => <div key={`${event.stepId}-${event.type}-${index}`} className='flex gap-2 py-0.5'>
-        <span className='w-20 shrink-0 font-medium text-foreground/75'>{event.stage}</span>
+    {open && <div data-testid='run-status-details' role='region' aria-label='Agent workflow details' className='absolute inset-x-3 top-full z-30 mx-auto mt-1.5 max-h-56 max-w-[50rem] overflow-y-auto rounded-xl border bg-background/96 p-2.5 text-[11px] text-muted-foreground shadow-xl backdrop-blur-xl'>
+      {events.map((event, index) => <div key={`${event.stepId}-${event.type}-${index}`} className={cn('flex items-center gap-2 rounded-md px-2 py-1', event.status === 'running' && 'bg-primary/6')}>
+        <span className='w-20 shrink-0 font-medium text-foreground/70'>{event.stage}</span>
         <span className='min-w-0 flex-1 truncate'>{event.label || event.type}</span>
-        <span className='shrink-0'>{event.status}</span>
+        <span className={cn('shrink-0 text-[10px]', event.status === 'running' && 'font-medium text-primary')}>{event.status}</span>
       </div>)}
     </div>}
   </div>

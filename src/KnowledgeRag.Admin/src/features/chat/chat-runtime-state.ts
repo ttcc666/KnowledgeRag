@@ -19,6 +19,21 @@ export function flattenMessagePages(pages: readonly unknown[] | undefined): Chat
   })
 }
 
+export function buildOptimisticThreadMessages(
+  persisted: readonly ChatMessage[],
+  liveUser: string,
+  liveAnswer: string,
+  createdAt = new Date().toISOString(),
+): ChatMessage[] {
+  const messages = [...persisted]
+  if (liveUser) messages.push({ id: 'live-user', role: 'user', content: liveUser, createdAt })
+  // Final answers are correctness-first buffered behind Reviewer/Citation Gate.
+  // Do not synthesize an empty running assistant turn while that buffer is empty: the
+  // official assistant-ui Thread intentionally renders an indicator for such a turn.
+  if (liveAnswer) messages.push({ id: 'live-assistant', role: 'assistant', content: liveAnswer, createdAt })
+  return messages
+}
+
 export function resolveRuntimeThreadId(
   conversationId: string,
   regular: readonly { id: string }[] | undefined,

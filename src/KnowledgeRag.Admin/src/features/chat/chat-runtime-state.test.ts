@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { flattenMessagePages, resolveRuntimeThreadId } from './chat-runtime-state'
+import { buildOptimisticThreadMessages, flattenMessagePages, resolveRuntimeThreadId } from './chat-runtime-state'
 
 const user = { id: 'u1', role: 'user', content: 'hello', createdAt: '2026-10-28T00:00:00Z' }
 const assistant = { id: 'a1', role: 'assistant', content: 'answer', createdAt: '2026-10-28T00:00:01Z' }
@@ -26,5 +26,23 @@ describe('resolveRuntimeThreadId', () => {
     expect(resolveRuntimeThreadId('c2', [], [{ id: 'c2' }])).toBe('c2')
     expect(resolveRuntimeThreadId('pending', [{ id: 'c1' }], [{ id: 'c2' }])).toBeUndefined()
     expect(resolveRuntimeThreadId('', [{ id: 'c1' }], [])).toBeUndefined()
+  })
+})
+
+
+describe('buildOptimisticThreadMessages', () => {
+  it('keeps the pending user turn without creating an empty assistant indicator while the final answer is buffered', () => {
+    const now = '2026-10-28T00:00:02Z'
+    expect(buildOptimisticThreadMessages([], 'question', '', now)).toEqual([
+      { id: 'live-user', role: 'user', content: 'question', createdAt: now },
+    ])
+  })
+
+  it('adds the live assistant turn only after visible answer text exists', () => {
+    const now = '2026-10-28T00:00:02Z'
+    expect(buildOptimisticThreadMessages([user], '', 'validated answer', now)).toEqual([
+      user,
+      { id: 'live-assistant', role: 'assistant', content: 'validated answer', createdAt: now },
+    ])
   })
 })
