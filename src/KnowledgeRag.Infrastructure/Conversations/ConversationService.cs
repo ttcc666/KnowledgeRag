@@ -98,25 +98,37 @@ public sealed class ConversationService(
             var result = onDelta is null
                 ? await agent.AskAsync(conversation.KnowledgeBaseId, message, conversation.AgentSessionJson, Progress, cancellationToken)
                 : await agent.StreamAsync(conversation.KnowledgeBaseId, message, conversation.AgentSessionJson, onDelta, Progress, cancellationToken);
+
+            var citations = CitationContract.Normalize(result.Answer, result.Sources);
+            trace.Enqueue(new
+            {
+                type = "citation.validation",
+                citationCount = citations.CitationCount,
+                invalidCitationCount = citations.InvalidCitationCount,
+                hadCitationMarkers = citations.HadCitationMarkers,
+                retrievedEvidenceCount = result.Sources.Count,
+                citedSourceCount = citations.Sources.Count
+            });
+
             var now = DateTimeOffset.UtcNow;
             if (conversation.Title == "新会话") conversation.Title = message.Length <= 40 ? message : message[..40] + "…";
             conversation.AgentSessionJson = result.SessionJson;
             conversation.UpdatedAt = now;
-            var sources = result.Sources.Select(ToSource).ToList();
+            var sources = citations.Sources.Select(ToSource).ToList();
             db.ChatMessages.AddRange(
                 new ChatMessageEntity { Id = Guid.NewGuid(), ConversationId = conversation.Id, Role = "user", Content = message, CreatedAt = now },
-                new ChatMessageEntity { Id = Guid.NewGuid(), ConversationId = conversation.Id, Role = "assistant", Content = result.Answer, SourcesJson = JsonSerializer.Serialize(sources, WebJson), CreatedAt = now.AddTicks(1) });
+                new ChatMessageEntity { Id = Guid.NewGuid(), ConversationId = conversation.Id, Role = "assistant", Content = citations.Answer, SourcesJson = JsonSerializer.Serialize(sources, WebJson), CreatedAt = now.AddTicks(1) });
             await db.SaveChangesAsync(cancellationToken);
 
             timer.Stop();
-            var run = await governance.RecordRunAsync(actor, conversation.KnowledgeBaseId, conversation.Id, message, result.Answer, sources.Count,
+            var run = await governance.RecordRunAsync(actor, conversation.KnowledgeBaseId, conversation.Id, message, citations.Answer, sources.Count,
                 profile.AnswerModel, profile.AgentMode, timer.ElapsedMilliseconds, trace.ToArray(), "completed", cancellationToken);
             await webhooks.DispatchAsync(run.TenantId, "rag.run.completed", new
             {
                 run.Id, run.KnowledgeBaseId, run.ConversationId, run.Status, run.SourceCount, run.LatencyMs,
                 run.EstimatedInputTokens, run.EstimatedOutputTokens, run.EstimatedCostUsd, run.AnswerModel, run.AgentMode
             }, cancellationToken);
-            return new ChatResponse(conversation.Id, result.Answer, sources);
+            return new ChatResponse(conversation.Id, citations.Answer, sources);
         }
         catch (OperationCanceledException)
         {
