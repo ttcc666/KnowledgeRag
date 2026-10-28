@@ -1,6 +1,7 @@
 using KnowledgeRag.Application.Contracts;
 using KnowledgeRag.Application.Security;
 using KnowledgeRag.Domain.Entities;
+using KnowledgeRag.Infrastructure.AI;
 using KnowledgeRag.Infrastructure.Configuration;
 using Microsoft.Extensions.Options;
 
@@ -16,7 +17,8 @@ public sealed class RerankerService(
         string query,
         IReadOnlyList<HybridCandidate> candidates,
         int topK,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        ResolvedAiEndpoint? endpoint = null)
     {
         if (candidates.Count == 0) return [];
         var take = Math.Min(candidates.Count, Math.Max(topK, _options.CandidateCount));
@@ -27,7 +29,7 @@ public sealed class RerankerService(
 
         IReadOnlyDictionary<Guid, double> llmScores = new Dictionary<Guid, double>();
         if (mode == "llm")
-            llmScores = await llm.RerankAsync(query, working, cancellationToken);
+            llmScores = await llm.RerankAsync(query, working, endpoint, cancellationToken);
 
         var localScores = ComputeLocalScores(query, working);
         var reranked = working
