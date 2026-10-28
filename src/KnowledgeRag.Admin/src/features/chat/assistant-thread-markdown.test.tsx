@@ -13,12 +13,13 @@ describe('chat markdown rendering', () => {
   it('renders source markdown structure without executing html or external resources', () => {
     const { container } = render(
       <SourceExcerptMarkdown
-        text={'#### 后端代码\n\n- 配置 `Min Height`\n- 保持模块边界\n\n```csharp\n.UnionByKey()\n```\n\n[外部链接](https://example.com)\n\n<script>alert(1)</script>\n\n![远程图片](https://example.com/pixel.png)'}
+        text={'#### 后端代码\n\n- 配置 `Min Height`\n- 保持模块边界\n\n2. 第二项\n3. 第三项\n\n```csharp\n.UnionByKey()\n```\n\n[外部链接](https://example.com)\n\n<script>alert(1)</script>\n\n![远程图片](https://example.com/pixel.png)'}
       />,
     )
 
     expect(screen.getByRole('heading', { name: '后端代码' })).toBeInTheDocument()
-    expect(screen.getAllByRole('listitem')).toHaveLength(2)
+    expect(screen.getAllByRole('listitem')).toHaveLength(4)
+    expect(container.querySelector('ol')).toHaveAttribute('start', '2')
     expect(screen.getByText('Min Height').tagName).toBe('CODE')
     expect(screen.getByText(/\.UnionByKey/).tagName).toBe('CODE')
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
