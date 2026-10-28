@@ -53,6 +53,7 @@
 
 ### Fixed
 
+- 修复 SQLite BM25 corpus 查询对 `DocumentChunk.CreatedAt`（`DateTimeOffset`）直接执行数据库端 `ORDER BY` 时可能抛出 `NotSupportedException` 的问题；SQLite 路径改用 `julianday(CreatedAt)` 在数据库内完成时间归一化排序并保持 `Bm25MaxCorpusChunks` 上限，同时新增真实 SQLite BM25 回归测试。
 - 修复 Evaluation 将“检索到了任意 Source”视为 grounded，导致答案没有引用 Evidence、甚至引用错误 Evidence ID 时仍可能得到 grounding pass 的问题。
 - 修复重新索引过程中旧索引被提前删除，导致 embedding / vector store / DB 写入失败后文档失去上一代可用索引的问题；失败与取消现在仅清理当前 staging generation。
 - 修复 Reindex 将文档状态改为 `Queued/Processing` 后，搜索层因只接受 `Ready` 而在整个重建窗口暂时隐藏该文档的问题。

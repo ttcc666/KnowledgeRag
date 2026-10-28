@@ -1,7 +1,5 @@
 using KnowledgeRag.Infrastructure.Persistence;
 using KnowledgeRag.Application.Contracts;
-using KnowledgeRag.Application.Security;
-using KnowledgeRag.Domain.Entities;
 using KnowledgeRag.Infrastructure.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -21,21 +19,10 @@ public sealed class Bm25SearchService(AppDbContext db, IOptions<RagOptions> opti
         var queryTokens = SearchTextTokenizer.Tokenize(query).Distinct(StringComparer.Ordinal).ToArray();
         if (queryTokens.Length == 0) return [];
 
-        var raw = await (
-            from c in db.DocumentChunks.AsNoTracking()
-            join d in db.Documents.AsNoTracking() on c.DocumentId equals d.Id
-            where c.KnowledgeBaseId == knowledgeBaseId && d.ChunkCount > 0
-            orderby c.CreatedAt descending
-            select new
-            {
-                c.Id,
-                c.DocumentId,
-                d.FileName,
-                c.ChunkIndex,
-                c.Text
-            })
-            .Take(Math.Max(1_000, _options.Bm25MaxCorpusChunks))
-            .ToListAsync(cancellationToken);
+        var raw = await LoadCorpusAsync(
+            knowledgeBaseId,
+            Math.Max(1_000, _options.Bm25MaxCorpusChunks),
+            cancellationToken);
 
         if (raw.Count == 0) return [];
 
@@ -92,6 +79,72 @@ public sealed class Bm25SearchService(AppDbContext db, IOptions<RagOptions> opti
                 0))
             .ToList();
     }
+
+    private async Task<IReadOnlyList<CorpusChunk>> LoadCorpusAsync(
+        Guid knowledgeBaseId,
+        int maxCorpusChunks,
+        CancellationToken cancellationToken)
+    {
+        if (!db.Database.IsSqlite())
+        {
+            return await (
+                from c in db.DocumentChunks.AsNoTracking()
+                join d in db.Documents.AsNoTracking() on c.DocumentId equals d.Id
+                where c.KnowledgeBaseId == knowledgeBaseId && d.ChunkCount > 0
+                orderby c.CreatedAt descending, c.Id descending
+                select new CorpusChunk(
+                    c.Id,
+                    c.DocumentId,
+                    d.FileName,
+                    c.ChunkIndex,
+                    c.Text))
+                .Take(maxCorpusChunks)
+                .ToListAsync(cancellationToken);
+        }
+
+        // EF Core's SQLite provider can read/write DateTimeOffset but cannot translate
+        // ordering/comparison over it. Keep the corpus bounded in SQLite itself instead
+        // of materializing every chunk just to sort on the client. julianday() correctly
+        // normalizes ISO-8601 offsets before ordering.
+        var chunks = await db.DocumentChunks
+            .FromSqlInterpolated($"""
+                SELECT c.*
+                FROM "DocumentChunks" AS c
+                INNER JOIN "Documents" AS d ON c."DocumentId" = d."Id"
+                WHERE c."KnowledgeBaseId" = {knowledgeBaseId}
+                  AND d."ChunkCount" > 0
+                ORDER BY julianday(c."CreatedAt") DESC, c."Id" DESC
+                LIMIT {maxCorpusChunks}
+                """)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        if (chunks.Count == 0) return [];
+
+        var documentIds = chunks.Select(x => x.DocumentId).Distinct().ToArray();
+        var fileNames = await db.Documents
+            .AsNoTracking()
+            .Where(x => documentIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.FileName })
+            .ToDictionaryAsync(x => x.Id, x => x.FileName, cancellationToken);
+
+        return chunks
+            .Where(x => fileNames.ContainsKey(x.DocumentId))
+            .Select(x => new CorpusChunk(
+                x.Id,
+                x.DocumentId,
+                fileNames[x.DocumentId],
+                x.ChunkIndex,
+                x.Text))
+            .ToList();
+    }
+
+    private sealed record CorpusChunk(
+        Guid Id,
+        Guid DocumentId,
+        string FileName,
+        int ChunkIndex,
+        string Text);
 
     private sealed record TokenizedChunk(
         Guid Id,
