@@ -23,11 +23,10 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: src/KnowledgeRag.Admin/package-lock.json
-      - name: Install official assistant-ui elements from registry
+      - name: Install official assistant-ui Sources element from registry
         working-directory: src/KnowledgeRag.Admin
         run: |
-          npx shadcn@latest add https://r.assistant-ui.com/thread.json https://r.assistant-ui.com/thread-list.json --yes --overwrite
-          npm install @assistant-ui/react@latest @assistant-ui/react-markdown@latest --save
+          npx shadcn@latest add https://r.assistant-ui.com/sources.json --yes --overwrite
       - name: Preserve existing shared UI primitives outside Chat
         run: |
           git checkout origin/main -- src/KnowledgeRag.Admin/src/components/ui/button.tsx || true
@@ -39,5 +38,5 @@ jobs:
           if git diff --cached --quiet; then
             exit 0
           fi
-          git commit -m "refactor(chat): import official assistant-ui elements"
+          git commit -m "refactor(chat): import official assistant-ui sources"
           git push origin HEAD:refactor/chat-official-assistant-ui-elements
