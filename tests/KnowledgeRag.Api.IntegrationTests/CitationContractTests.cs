@@ -25,6 +25,37 @@ public sealed class CitationContractTests
     }
 
     [Fact]
+    public void Normalize_ExpandsGroupedEvidenceReferences_IntoStableClickableMarkers()
+    {
+        var evidence = new[]
+        {
+            Hit(1, "a.pdf"),
+            Hit(2, "b.pdf"),
+            Hit(3, "c.pdf")
+        };
+
+        var result = CitationContract.Normalize("组合证据 [E2, e1]，补充 [E2, E3]。", evidence);
+
+        Assert.Equal("组合证据 [1] [2]，补充 [1] [3]。", result.Answer);
+        Assert.Equal(3, result.CitationCount);
+        Assert.Equal(0, result.InvalidCitationCount);
+        Assert.Equal(new[] { "b.pdf", "a.pdf", "c.pdf" }, result.Sources.Select(x => x.FileName));
+    }
+
+    [Fact]
+    public void Normalize_GroupedReferenceWithInvalidMember_IsCountedInvalidAndRemoved()
+    {
+        var evidence = new[] { Hit(1, "a.pdf") };
+
+        var result = CitationContract.Normalize("事实 [E1, E99]。", evidence);
+
+        Assert.Equal("事实 [1]。", result.Answer);
+        Assert.Equal(1, result.CitationCount);
+        Assert.Equal(1, result.InvalidCitationCount);
+        Assert.DoesNotContain("E99", result.Answer, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Normalize_RemovesInvalidEvidenceReferences_AndDoesNotExposeThemAsSources()
     {
         var evidence = new[] { Hit(1, "a.pdf") };

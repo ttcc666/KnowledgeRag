@@ -6,7 +6,7 @@ import {
   ThreadListPrimitive,
   useExternalStoreRuntime,
 } from '@assistant-ui/react'
-import { ArchiveRestore, Bot, FileText, LoaderCircle, Maximize2, Menu, Minimize2, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Trash2, X } from 'lucide-react'
+import { ArchiveRestore, Bot, FileText, Maximize2, Menu, Minimize2, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Trash2, X } from 'lucide-react'
 import { motion } from 'motion/react'
 import { toast } from 'sonner'
 import { Thread } from '@/components/assistant-ui/elements/thread.aui'
@@ -69,11 +69,8 @@ function formatWorkflowMarkdown(events: readonly RagProgressEvent[], running: bo
   const metrics = [queryCount ? `${queryCount} 个查询` : null, evidenceCount != null ? `${evidenceCount} 条证据` : null].filter(Boolean).join(' · ')
   const detail = [stages.join(' · '), metrics].filter(Boolean).join(' · ')
 
-  return [
-    `> **Agent workflow · ${state}**  `,
-    `> ${label}`,
-    detail ? `> ${escapeMarkdownText(detail)}` : '',
-  ].filter(Boolean).join('\n')
+  const summary = [label, detail ? escapeMarkdownText(detail) : ''].filter(Boolean).join(' · ')
+  return `**Agent workflow · ${state}**  \n${summary}`
 }
 
 function citationTarget(href: string) {
@@ -416,7 +413,6 @@ export function ChatPage() {
               <div className='min-w-0'>
                 <div className='flex min-w-0 items-center gap-2'>
                   <span className='truncate text-sm font-semibold'>{selectedConversation?.title || '新会话'}</span>
-                  {streaming && <span className='hidden items-center gap-1 rounded-full bg-primary/8 px-2 py-0.5 text-[10px] font-medium text-primary sm:inline-flex'><LoaderCircle className='size-3 animate-spin' />运行中</span>}
                   {selectedArchived && <span className='hidden rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline'>已归档 · 只读</span>}
                   {focusMode && <span className='hidden rounded-full bg-primary/8 px-2 py-0.5 text-[10px] font-medium text-primary sm:inline'>专注模式</span>}
                 </div>

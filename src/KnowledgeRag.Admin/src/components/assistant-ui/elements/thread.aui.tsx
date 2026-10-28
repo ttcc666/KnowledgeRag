@@ -755,10 +755,10 @@ const AssistantMessage: FC = () => {
                 return (
                   <span
                     data-slot="aui_assistant-message-indicator"
-                    className="animate-pulse font-sans"
+                    className="sr-only"
                     aria-label="Assistant is working"
                   >
-                    {"●"}
+                    Assistant is working
                   </span>
                 );
               default:
@@ -815,11 +815,13 @@ const AssistantActionBar: FC = () => {
           </TooltipIconButton>
         </ActionBarPrimitive.FeedbackNegative>
       </AuiIf>
-      <ActionBarPrimitive.Reload asChild>
-        <TooltipIconButton tooltip="Refresh">
-          <RefreshCwIcon />
-        </TooltipIconButton>
-      </ActionBarPrimitive.Reload>
+      <AuiIf condition={(s) => s.thread.capabilities.reload}>
+        <ActionBarPrimitive.Reload asChild>
+          <TooltipIconButton tooltip="Refresh">
+            <RefreshCwIcon />
+          </TooltipIconButton>
+        </ActionBarPrimitive.Reload>
+      </AuiIf>
       <ActionBarMorePrimitive.Root>
         <ActionBarMorePrimitive.Trigger asChild>
           <TooltipIconButton
@@ -909,11 +911,13 @@ const UserActionBar: FC = () => {
       autohide="not-last"
       className="aui-user-action-bar-root flex flex-col items-end"
     >
-      <ActionBarPrimitive.Edit asChild>
-        <TooltipIconButton tooltip="Edit" className="aui-user-action-edit">
-          <PencilIcon />
-        </TooltipIconButton>
-      </ActionBarPrimitive.Edit>
+      <AuiIf condition={(s) => s.thread.capabilities.edit}>
+        <ActionBarPrimitive.Edit asChild>
+          <TooltipIconButton tooltip="Edit" className="aui-user-action-edit">
+            <PencilIcon />
+          </TooltipIconButton>
+        </ActionBarPrimitive.Edit>
+      </AuiIf>
     </ActionBarPrimitive.Root>
   );
 };
@@ -950,6 +954,9 @@ const BranchPicker: FC<BranchPickerPrimitive.Root.Props> = ({
   className,
   ...rest
 }) => {
+  const canSwitchToBranch = useAuiState((s) => s.thread.capabilities.switchToBranch);
+  if (!canSwitchToBranch) return null;
+
   return (
     <BranchPickerPrimitive.Root
       hideWhenSingleBranch
