@@ -2,6 +2,7 @@ using KnowledgeRag.Infrastructure.AI;
 using KnowledgeRag.Infrastructure.Configuration;
 using KnowledgeRag.Infrastructure.Conversations;
 using KnowledgeRag.Infrastructure.Documents;
+using KnowledgeRag.Infrastructure.Governance;
 using KnowledgeRag.Infrastructure.Identity;
 using KnowledgeRag.Infrastructure.KnowledgeBases;
 using KnowledgeRag.Infrastructure.Messaging;
@@ -35,6 +36,11 @@ public static class DependencyInjection
         services.AddDocumentModule(configuration);
         services.AddConversationModule();
         services.AddMessagingModule(configuration);
+        services.AddScoped<RagRuntimeProfileService>();
+        services.AddScoped<GovernanceService>();
+        services.AddScoped<EvaluationService>();
+        services.AddScoped<WebhookAutomationService>();
+        services.AddHttpClient("governance-webhook", client => client.Timeout = TimeSpan.FromSeconds(8));
         return services;
     }
 
