@@ -73,6 +73,7 @@
 
 ### Fixed
 
+- 修复 Chat 受限 Markdown renderer 对缩进列表、连续有序列表和 inline code 处理不完整，导致回答中出现原始 `-` / 反引号、段落空隙过大且执行过程卡片与正文阅读宽度不一致的问题；现在正文、引用、执行过程和反馈栏统一在同一阅读宽度内，同时继续禁止 raw HTML / 任意链接并保留可信 Citation 边界。
 - 修复 assistant-ui Thread List / 分页切换的瞬态状态可能让 Chat runtime 收到尚未出现在 regular/archived 列表中的 `threadId` 或异常消息项，进而在构建 Source 索引时访问 `undefined.id` 并使页面崩溃的问题；Chat 现在只暴露已注册 thread，并在分页消息边界过滤空值与畸形项。
 - 修复 React StrictMode 下 Document Processing SignalR effect cleanup 可能在初始 negotiation 尚未完成时调用 `stop()` 并产生 `The connection was stopped during negotiation` 的问题；cleanup 现在等待 `start()` settle 后再停止该 effect 实例的连接。
 - 修复 Reviewer 已通过但答案仍可能在 Citation normalize 之前通过 SSE 暂时显示 raw `[E#]` / 越界引用的问题；客户端现在只收到最终 Citation Gate 处理后的答案。
