@@ -31,7 +31,7 @@ export function TenantsPage() {
       </Card>
       {selected && <TenantWorkspace tenantId={selected.id} tenantRole={selected.role} />}
     </div> : !tenants.isLoading && <EmptyState icon={<Users className='size-5 text-primary' />} title='没有租户' description='创建组织租户，开始配置成员、API Key 与知识库隔离。' />}
-    <Dialog open={createOpen} onOpenChange={setCreateOpen}><DialogContent><DialogHeader><DialogTitle>新建租户</DialogTitle><DialogDescription>建立一个新的组织级隔离边界。</DialogDescription></DialogHeader><div className='space-y-2'><Label>租户名称</Label><Input autoFocus value={tenantName} onChange={(e) => setTenantName(e.target.value)} placeholder='Acme AI Team' /></div><DialogFooter><Button variant='outline' onClick={() => setCreateOpen(false)}>取消</Button><Button disabled={!tenantName.trim() || create.isPending} onClick={() => create.mutate()}>创建</Button></DialogFooter></Dialog>
+    <Dialog open={createOpen} onOpenChange={setCreateOpen}><DialogContent><DialogHeader><DialogTitle>新建租户</DialogTitle><DialogDescription>建立一个新的组织级隔离边界。</DialogDescription></DialogHeader><div className='space-y-2'><Label>租户名称</Label><Input autoFocus value={tenantName} onChange={(e) => setTenantName(e.target.value)} placeholder='Acme AI Team' /></div><DialogFooter><Button variant='outline' onClick={() => setCreateOpen(false)}>取消</Button><Button disabled={!tenantName.trim() || create.isPending} onClick={() => create.mutate()}>创建</Button></DialogFooter></DialogContent></Dialog>
   </div>
 }
 
