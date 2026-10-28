@@ -42,6 +42,8 @@ public static class GovernanceEndpoints
         group.MapPut("/prompts/{promptId:guid}", async (Guid tenantId, Guid promptId, ClaimsPrincipal principal, PromptProfileUpsert request, GovernanceService service, CancellationToken ct) =>
             Results.Ok(await service.SavePromptProfileAsync(HttpActorContext.From(principal), tenantId, request with { Id = promptId }, ct)));
 
+        group.MapGet("/webhooks/providers", () => Results.Ok(WebhookChannelAdapterRegistry.Providers));
+
         group.MapGet("/webhooks", async (Guid tenantId, ClaimsPrincipal principal, GovernanceService service, CancellationToken ct) =>
         {
             var hooks = await service.ListWebhooksAsync(HttpActorContext.From(principal), tenantId, ct);
@@ -99,6 +101,7 @@ public static class GovernanceEndpoints
         hook.Id,
         hook.TenantId,
         hook.Name,
+        hook.Provider,
         hook.Url,
         hook.EventTypes,
         hook.IsActive,

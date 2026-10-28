@@ -1,6 +1,4 @@
 using System.Net;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using DotNetCore.CAP;
 using KnowledgeRag.Domain.Entities;
@@ -70,28 +68,10 @@ public sealed class WebhookAutomationService(
             return;
         }
 
-        using var payloadDocument = JsonDocument.Parse(delivery.PayloadJson);
-        var envelope = new
-        {
-            id = delivery.EventId,
-            type = delivery.EventType,
-            createdAt = delivery.CreatedAt,
-            data = payloadDocument.RootElement.Clone()
-        };
-        var json = JsonSerializer.Serialize(envelope, WebJson);
-        using var request = new HttpRequestMessage(HttpMethod.Post, uri)
-        {
-            Content = new StringContent(json, Encoding.UTF8, "application/json")
-        };
-        request.Headers.TryAddWithoutValidation("X-KnowledgeRag-Event", delivery.EventType);
-        request.Headers.TryAddWithoutValidation("X-KnowledgeRag-Delivery", delivery.EventId.ToString("D"));
-        if (!string.IsNullOrWhiteSpace(hook.Secret))
-        {
-            var secret = secretProtector.Unprotect(hook.Secret);
-            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
-            var signature = Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(json))).ToLowerInvariant();
-            request.Headers.TryAddWithoutValidation("X-KnowledgeRag-Signature", "sha256=" + signature);
-        }
+        var (envelopeJson, message) = WebhookChannelMessageFormatter.Format(delivery);
+        var secret = string.IsNullOrWhiteSpace(hook.Secret) ? null : secretProtector.Unprotect(hook.Secret);
+        var adapter = WebhookChannelAdapterRegistry.Get(hook.Provider);
+        using var request = adapter.CreateRequest(uri, delivery, envelopeJson, message, secret);
 
         try
         {

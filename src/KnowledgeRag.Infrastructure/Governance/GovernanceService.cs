@@ -35,7 +35,7 @@ public sealed record RagProfileUpdate(
 
 public sealed record ModelPriceUpdate(string Model, decimal InputCostPerMillionTokens, decimal OutputCostPerMillionTokens, bool IsActive = true);
 public sealed record PromptProfileUpsert(Guid? Id, Guid? KnowledgeBaseId, string Name, string PlannerPrompt, string AnswerPrompt, string ReviewerPrompt, bool IsActive);
-public sealed record WebhookUpsert(Guid? Id, string Name, string Url, IReadOnlyList<string> EventTypes, string? Secret, bool IsActive);
+public sealed record WebhookUpsert(Guid? Id, string Name, string Url, IReadOnlyList<string> EventTypes, string? Secret, bool IsActive, string? Provider = null);
 public sealed record EvaluationDatasetCreate(Guid KnowledgeBaseId, string Name, string? Description);
 public sealed record EvaluationCaseCreate(string Category, string Query, string? ExpectedAnswerContains, bool RequiresKnowledge = true);
 
@@ -206,6 +206,7 @@ public sealed class GovernanceService(
         await tenantAccess.RequireAsync(actor, tenantId, TenantRole.Admin, ct);
         if (!Uri.TryCreate(request.Url, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
             throw new InvalidOperationException("Webhook URL 必须是有效的 http/https 地址。");
+        var provider = WebhookChannelAdapterRegistry.NormalizeProvider(request.Provider);
         var now = DateTimeOffset.UtcNow;
         var entity = request.Id is Guid id
             ? await db.Set<WebhookSubscriptionEntity>().SingleOrDefaultAsync(x => x.Id == id && x.TenantId == tenantId, ct)
@@ -216,6 +217,7 @@ public sealed class GovernanceService(
             db.Add(entity);
         }
         entity.Name = request.Name.Trim();
+        entity.Provider = provider;
         entity.Url = request.Url.Trim();
         entity.EventTypes = string.Join(',', request.EventTypes.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).Distinct(StringComparer.OrdinalIgnoreCase));
         if (!string.IsNullOrWhiteSpace(request.Secret)) entity.Secret = request.Secret.Trim();
