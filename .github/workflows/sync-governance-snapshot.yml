@@ -23,13 +23,16 @@ jobs:
       - name: Restore
         run: dotnet restore KnowledgeRag.NonAzure.sln
       - name: Install dotnet-ef
-        run: dotnet tool install --global dotnet-ef --version 10.0.3
+        run: dotnet tool install --global dotnet-ef --version 10.0.14
+      - name: Build startup project
+        run: dotnet build src/KnowledgeRag.Api/KnowledgeRag.Api.csproj --no-restore --configuration Debug
       - name: Regenerate EF model snapshot
         run: >-
           dotnet ef migrations add GovernanceSnapshotSync
           --project src/KnowledgeRag.Infrastructure/KnowledgeRag.Infrastructure.csproj
           --startup-project src/KnowledgeRag.Api/KnowledgeRag.Api.csproj
           --context AppDbContext
+          --no-build
       - name: Commit generated snapshot
         run: |
           git config user.name "github-actions[bot]"
