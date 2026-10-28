@@ -8,11 +8,17 @@ function settleTerminalRun(events: RagProgressEvent[], next: RagProgressEvent) {
     : event)
 }
 
+function orderBySequence(events: RagProgressEvent[]) {
+  return events
+    .sort((a, b) => a.sequence - b.sequence || a.stepId.localeCompare(b.stepId))
+    .slice(-80)
+}
+
 export function mergeProgressEvent(events: RagProgressEvent[], next: RagProgressEvent): RagProgressEvent[] {
   const settled = settleTerminalRun(events, next)
   const index = settled.findIndex((event) => event.stepId === next.stepId)
-  if (index < 0) return [...settled, next].slice(-80)
+  if (index < 0) return orderBySequence([...settled, next])
   const merged = settled.slice()
   merged[index] = next
-  return merged
+  return orderBySequence(merged)
 }
