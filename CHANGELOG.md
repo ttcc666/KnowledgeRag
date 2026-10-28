@@ -18,12 +18,15 @@
 
 ### Added
 
+- 新增 Webhook **CAP 异步投递管线**：每个订阅独立发布 delivery message，PostgreSQL 环境复用 CAP 持久化 storage / RabbitMQ 重试，避免外部 HTTP 阻塞 Chat / Evaluation 请求关键路径。
+- 新增 Webhook SSRF 地址策略与回归测试，覆盖 localhost、loopback、RFC1918 私网、link-local、IPv6 unique-local 等受限目标。
 - 新增 RAG **Structured Citation Contract**：Answer Agent 使用 `[E#]` 绑定当前 Evidence，服务端确定性校验并转换为稳定的用户引用编号，只持久化答案实际引用的来源。
 - 新增 citation normalization 回归测试，覆盖引用重排、重复引用、非法 Evidence ID 和无引用回答。
 - 新增 `DEVELOPMENT_WORKFLOW.md`，正式记录分支、Draft PR、增量 CI、Ready 全量验证、Changelog、Hotfix、数据库与 Agent/RAG 变更的开发流程。
 
 ### Changed
 
+- Webhook delivery 使用稳定 Event ID / `X-KnowledgeRag-Delivery`，仅对 timeout、429 与 5xx 等可恢复失败交给 CAP 重试；自动重定向关闭，避免 redirect 绕过目标地址策略。
 - Reviewer 增加强制引用审核规则：重要知识库事实必须具备有效 `[E#]`，缺失、越界或与 claim 不匹配的引用进入 `CitationErrors` 并使审核失败。
 - Chat Source 不再等同于“本轮所有检索结果”，只暴露最终答案真正引用到的 Evidence；Run Trace 记录 citation validation 统计。
 - CI 改为分层策略：Draft PR 根据改动路径选择 frontend / backend / native 测试；PR 转为 Ready、`main` push、手动触发和 nightly schedule 时强制完整 CI。
@@ -39,6 +42,7 @@
 
 ### Security
 
+- Webhook 实际连接时重新解析 DNS，只允许公网地址，并阻止本机、私网、link-local、multicast、IPv6 unique-local 与 `.local` 目标；连接层检查降低 DNS rebinding / metadata endpoint SSRF 风险。
 - 非法或不存在的 Evidence 引用不会作为可信 Citation 返回前端；Knowledge Base 内容仍按 untrusted data 处理，管理员 Prompt 不能覆盖强制 grounding / citation 规则。
 
 ---
