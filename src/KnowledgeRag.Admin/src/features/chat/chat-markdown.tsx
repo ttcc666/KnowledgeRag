@@ -91,6 +91,7 @@ export function SourceExcerptMarkdown({ text }: { text: string }) {
           th: ({ children }) => <th className='border px-2 py-1.5 font-semibold'>{children}</th>,
           td: ({ children }) => <td className='border px-2 py-1.5 align-top'>{children}</td>,
           a: ({ children }) => <span className='underline decoration-dotted underline-offset-2'>{children}</span>,
+          img: ({ alt }) => <span className='text-muted-foreground'>[图片{alt ? `: ${alt}` : ''}]</span>,
         }}
       >
         {text}
