@@ -180,14 +180,37 @@ const SourcesImpl: SourceMessagePartComponent = (part) => {
   }
 
   if (part.sourceType === "document") {
+    const content = (
+      <>
+        <DocumentSourceIcon />
+        <SourceTitle>{part.title}</SourceTitle>
+      </>
+    );
+    const localHref = typeof part.id === "string" && part.id.startsWith("kr-source-")
+      ? `#${part.id}`
+      : undefined;
+
+    if (localHref) {
+      return (
+        <Source
+          href={localHref}
+          target="_self"
+          rel={undefined}
+          variant="secondary"
+          className="gap-1.5 no-underline"
+        >
+          {content}
+        </Source>
+      );
+    }
+
     return (
       <Badge
         variant="secondary"
         className="focus-visible:border-ring focus-visible:ring-ring/50 outline-none focus-visible:ring-1"
       >
         <span data-slot="source" className="inline-flex items-center gap-1.5">
-          <DocumentSourceIcon />
-          <SourceTitle>{part.title}</SourceTitle>
+          {content}
         </span>
       </Badge>
     );

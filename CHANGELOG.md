@@ -44,7 +44,7 @@
 
 ### Changed
 
-- Chat 主界面改为 assistant-ui 官方 registry Elements：直接使用官方 `Thread` / `ThreadList` / `MarkdownText` / `Sources`，移除 KnowledgeRag 自建消息气泡、Composer、ActionBar、Welcome、消息 Markdown 覆盖和来源 chips；TanStack Query + SSE 仅作为 External Store 数据适配层，Agent Timeline 与深度 Evidence Panel 移到 Thread 外部，避免继续改写官方消息布局。
+- Chat 主界面继续使用 assistant-ui 官方 registry `Thread` / `ThreadList` / `MarkdownText` / `Sources`；TanStack Query + SSE 作为 External Store 数据适配层，安全的 Agent Workflow 运行状态现在属于当前 assistant turn 并在消息流内呈现，深度 Evidence Panel 仍保持独立侧栏，不展示 Chain of Thought。
 - Chat assistant answer 改用 assistant-ui 官方 `MarkdownTextPrimitive` + GFM 渲染，不再维护手写 Markdown parser；Source Evidence Panel 使用同一标准 Markdown 语义渲染标题、列表、代码块、表格等，同时保持普通链接/远程图片不可交互或加载。
 - RAG Profile 在同一 scoped request 内只解析一次 execution snapshot；Budget Reservation、Agent 执行与 Evaluation 使用一致的模型、Prompt、检索和 Reviewer 配置，避免并发配置修改造成预留与实际执行快照不一致。
 - Multi-query Retrieval 将原始用户查询保持为 mandatory，Planner 生成的扩展查询改为 best-effort；可选扩展查询失败会记录失败但不再拖垮仍有原始检索结果的整轮。
@@ -75,8 +75,10 @@
 
 ### Fixed
 
-- 修复 correctness-first Answer / Citation Gate 缓冲期间向 assistant-ui Thread 合成空的 running assistant turn，导致长时间只显示孤立 `●` working indicator；现在 pending 阶段仅保留用户消息与外部 Workflow 状态，只有可见答案文本到达后才创建 assistant message。
-- 优化 Chat 工作区视觉层级：顶部会话工具栏并入 Thread workspace，Agent Workflow 默认保持紧凑且详情以 overlay 展开，官方 ThreadList 侧栏按推荐的 256px 宽度呈现，Source Panel 与主阅读区使用统一 header/边框层级，同时仅通过官方 Thread shell 变量适度放宽阅读宽度。
+- 修复 Agent Workflow 与实际对话分离、Citation Gate 等待期间只显示孤立 loading indicator 的问题；运行开始即创建当前 assistant turn，并把安全的 Planner / Retrieval / Answer / Reviewer 状态作为这条消息的一部分实时更新，最终正文仍只在 Citation Gate 通过后出现。
+- 改进 Chat 运行中状态：assistant-ui 官方 running indicator 在 KnowledgeRag workspace 中改为紧凑 spinner + “正在处理”，不再显示无语义的单独 `●`。
+- 修复同一轮 user / assistant 时间戳在 SQLite `julianday` 或浏览器毫秒精度下折叠后可能倒序的问题；新消息持久化使用可见的毫秒间隔，SQLite/PostgreSQL 查询增加 Role/Id 确定性 tie-breaker，前端分页合并再执行去重和稳定排序，保证 user → assistant。
+- 修复官方 assistant-ui Sources 迁移后正文 `[n]` 与 document source chips 只显示不可交互文本的问题；只有当前 assistant message 的可信 Source 范围内 `[n]` 会生成可点击 Citation，正文引用与编号 Source chip 都按 message-scoped source map 打开对应 Evidence Panel，历史回答不再错误绑定到最新回答 Sources。
 - Webhook 原生 HTTP 投递超过配置的 8 秒超时时，不再以未分类 `TaskCanceledException` 记录；现在保存明确的 Request Timeout 状态并抛出可重试 `WebhookDeliveryTimeoutException` 供 CAP 重试，手动 Webhook Test API 返回 504。
 - 修复 Chat 受限 Markdown renderer 对缩进列表、连续有序列表和 inline code 处理不完整，导致回答中出现原始 `-` / 反引号、段落空隙过大且执行过程卡片与正文阅读宽度不一致的问题；现在正文、引用、执行过程和反馈栏统一在同一阅读宽度内，同时继续禁止 raw HTML / 任意链接并保留可信 Citation 边界。
 - 修复 assistant-ui Thread List / 分页切换的瞬态状态可能让 Chat runtime 收到尚未出现在 regular/archived 列表中的 `threadId` 或异常消息项，进而在构建 Source 索引时访问 `undefined.id` 并使页面崩溃的问题；Chat 现在只暴露已注册 thread，并在分页消息边界过滤空值与畸形项。

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AssistantRuntimeProvider,
@@ -6,13 +6,13 @@ import {
   ThreadListPrimitive,
   useExternalStoreRuntime,
 } from '@assistant-ui/react'
-import { ArchiveRestore, Bot, ChevronDown, FileText, LoaderCircle, Maximize2, Menu, Minimize2, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Trash2, X } from 'lucide-react'
+import { ArchiveRestore, Bot, FileText, LoaderCircle, Maximize2, Menu, Minimize2, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Trash2, X } from 'lucide-react'
 import { motion } from 'motion/react'
 import { toast } from 'sonner'
 import { Thread } from '@/components/assistant-ui/elements/thread.aui'
 import { ThreadList } from '@/components/assistant-ui/elements/thread-list.aui'
 import { SourceExcerptMarkdown } from './chat-markdown'
-import { buildOptimisticThreadMessages, flattenMessagePages, resolveRuntimeThreadId } from './chat-runtime-state'
+import { buildOptimisticThreadMessages, flattenMessagePages, linkTrustedCitations, resolveRuntimeThreadId } from './chat-runtime-state'
 import { mergeProgressEvent } from './progress-events'
 import { api, getErrorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -37,6 +37,52 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
 }
 
+function escapeMarkdownText(value: string) {
+  return value.replace(/([\\`*_{}\[\]<>])/g, '\\$1')
+}
+
+function workflowStatusMark(status?: string) {
+  if (status === 'completed') return '✓'
+  if (status === 'running') return '●'
+  if (status === 'warning') return '⚠'
+  if (status === 'failed') return '×'
+  return '·'
+}
+
+function formatWorkflowMarkdown(events: readonly RagProgressEvent[], running: boolean) {
+  const workflow = [...events].reverse().find((event) => event.stepId === 'workflow')
+  const active = [...events].reverse().find((event) => event.status === 'running') || events[events.length - 1]
+  const state = running ? '运行中' : workflow?.status === 'failed' ? '失败' : '完成'
+  const label = escapeMarkdownText(active?.label || (running ? '正在启动 Agent workflow' : 'Agent workflow 已完成'))
+  const stageNames: Record<string, string> = { planner: '规划', retrieval: '检索', answer: '回答', review: '审核' }
+  const stages = Object.entries(stageNames).map(([stage, name]) => {
+    const event = [...events].reverse().find((item) => item.stage === stage)
+    return event ? `${workflowStatusMark(event.status)} ${name}` : null
+  }).filter((value): value is string => !!value)
+  const queryCount = events.filter((event) => event.type === 'query.completed').length
+  const retrieval = [...events].reverse().find((event) => event.stage === 'retrieval' && event.status === 'completed')
+  const evidenceCount = typeof retrieval?.data?.evidenceCount === 'number'
+    ? retrieval.data.evidenceCount
+    : typeof retrieval?.data?.mergedEvidenceCount === 'number'
+      ? retrieval.data.mergedEvidenceCount
+      : undefined
+  const metrics = [queryCount ? `${queryCount} 个查询` : null, evidenceCount != null ? `${evidenceCount} 条证据` : null].filter(Boolean).join(' · ')
+  const detail = [stages.join(' · '), metrics].filter(Boolean).join(' · ')
+
+  return [
+    `> **Agent workflow · ${state}**  `,
+    `> ${label}`,
+    detail ? `> ${escapeMarkdownText(detail)}` : '',
+  ].filter(Boolean).join('\n')
+}
+
+function citationTarget(href: string) {
+  const match = /^#kr-(?:citation|source)-(\d+)-(.+)$/.exec(href)
+  if (!match) return null
+  const number = Number(match[1])
+  return Number.isInteger(number) && number > 0 ? { number, messageId: match[2] } : null
+}
+
 export function ChatPage() {
   const qc = useQueryClient()
   const kbs = useQuery({ queryKey: ['knowledge-bases'], queryFn: api.knowledgeBases.list })
@@ -54,7 +100,14 @@ export function ChatPage() {
   useEffect(() => {
     if (activeKb && !conversationId && conversations.data?.length) setConversationId(conversations.data[0].id)
   }, [activeKb, conversationId, conversations.data])
-  useEffect(() => setConversationId(''), [activeKb])
+  useEffect(() => {
+    setConversationId('')
+    setSelectedSource(null)
+    setSelectedSourceMessageId(null)
+    setSourcePanel(false)
+    setMobileSource(false)
+    setProgressEvents([])
+  }, [activeKb])
 
   const messages = useInfiniteQuery({
     queryKey: ['messages', runtimeThreadId || 'unselected'],
@@ -68,6 +121,7 @@ export function ChatPage() {
   })
 
   const [selectedSource, setSelectedSource] = useState<ChatSource | null>(null)
+  const [selectedSourceMessageId, setSelectedSourceMessageId] = useState<string | null>(null)
   const [sourcePanel, setSourcePanel] = useState(false)
   const [conversationsOpen, setConversationsOpen] = useState(() => localStorage.getItem('chat-conversations-open') !== 'false')
   const [focusMode, setFocusMode] = useState(false)
@@ -76,9 +130,10 @@ export function ChatPage() {
   const [mobileSource, setMobileSource] = useState(false)
   const [liveUser, setLiveUser] = useState('')
   const [liveAnswer, setLiveAnswer] = useState('')
+  const [liveSources, setLiveSources] = useState<ChatSource[]>([])
+  const [liveCreatedAt, setLiveCreatedAt] = useState('')
   const [streaming, setStreaming] = useState(false)
   const [progressEvents, setProgressEvents] = useState<RagProgressEvent[]>([])
-  const [progressOpen, setProgressOpen] = useState(false)
   const controllerRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
@@ -111,28 +166,32 @@ export function ChatPage() {
     setStreaming(true)
     setLiveUser(prompt)
     setLiveAnswer('')
+    setLiveSources([])
+    setLiveCreatedAt(new Date().toISOString())
     setProgressEvents([])
-    setProgressOpen(false)
 
     try {
-      await api.conversations.stream(
+      const result = await api.conversations.stream(
         id,
         prompt,
         (delta) => setLiveAnswer((current) => current + delta),
         controller.signal,
         (event) => setProgressEvents((current) => mergeProgressEvent(current, event)),
       )
+      setLiveSources(result.sources)
       await Promise.all([
         qc.invalidateQueries({ queryKey: ['messages', id] }),
         invalidateConversationLists(),
       ])
       setLiveUser('')
       setLiveAnswer('')
-      setProgressOpen(false)
+      setLiveSources([])
+      setLiveCreatedAt('')
     } catch (error) {
       setLiveUser('')
       setLiveAnswer('')
-      setProgressOpen(false)
+      setLiveSources([])
+      setLiveCreatedAt('')
       if ((error as Error).name === 'AbortError') toast.info('已停止生成；未完成的临时消息已清理')
       else toast.error(getErrorMessage(error))
     } finally {
@@ -146,31 +205,84 @@ export function ChatPage() {
     [messages.data],
   )
 
+  const liveSourcesJson = useMemo(() => liveSources.length ? JSON.stringify(liveSources) : null, [liveSources])
   const threadMessages = useMemo<ChatMessage[]>(
-    () => buildOptimisticThreadMessages(loadedMessages, liveUser, liveAnswer),
-    [loadedMessages, liveUser, liveAnswer],
+    () => buildOptimisticThreadMessages(loadedMessages, liveUser, liveAnswer, streaming, liveSourcesJson, liveCreatedAt || undefined),
+    [loadedMessages, liveAnswer, liveCreatedAt, liveSourcesJson, liveUser, streaming],
   )
+
+  const latestAssistantMessage = useMemo(
+    () => [...threadMessages].reverse().find((message) => message.role.toLowerCase() === 'assistant'),
+    [threadMessages],
+  )
+  const latestSourcedAssistantMessage = useMemo(
+    () => [...threadMessages].reverse().find((message) => message.role.toLowerCase() === 'assistant' && parseSources(message).length > 0),
+    [threadMessages],
+  )
+  const workflowMessageId = progressEvents.length ? (streaming ? 'live-assistant' : latestAssistantMessage?.id) : undefined
+  const workflowMarkdown = progressEvents.length || streaming ? formatWorkflowMarkdown(progressEvents, streaming) : ''
+
+  const sourcesByMessageId = useMemo(() => {
+    const map = new Map<string, ChatSource[]>()
+    for (const message of threadMessages) {
+      if (message.role.toLowerCase() !== 'assistant') continue
+      const sources = parseSources(message)
+      if (sources.length) map.set(message.id, sources)
+    }
+    return map
+  }, [threadMessages])
+
+  const latestSources = latestSourcedAssistantMessage ? parseSources(latestSourcedAssistantMessage) : []
+  const selectedSources = selectedSourceMessageId ? sourcesByMessageId.get(selectedSourceMessageId) || [] : latestSources
+
+  const openCitation = useCallback((messageId: string, citationNumber: number) => {
+    const sources = sourcesByMessageId.get(messageId)
+    const source = sources?.[citationNumber - 1]
+    if (!source) return
+    setSelectedSource(source)
+    setSelectedSourceMessageId(messageId)
+    setFocusMode(false)
+    setSourcePanel(true)
+    if (window.innerWidth < 1024) setMobileSource(true)
+  }, [sourcesByMessageId])
+
+  const handleThreadClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    const target = event.target
+    if (!(target instanceof Element)) return
+    const anchor = target.closest<HTMLAnchorElement>('a[href^="#kr-citation-"], a[href^="#kr-source-"]')
+    if (!anchor) return
+    const parsed = citationTarget(anchor.getAttribute('href') || '')
+    if (!parsed || !sourcesByMessageId.get(parsed.messageId)?.[parsed.number - 1]) return
+    event.preventDefault()
+    openCitation(parsed.messageId, parsed.number)
+  }, [openCitation, sourcesByMessageId])
 
   const convertMessage = useCallback((message: ChatMessage) => {
     const role = message.role.toLowerCase() === 'user' ? 'user' as const : 'assistant' as const
     const sources = role === 'assistant' ? parseSources(message) : []
+    const answer = role === 'assistant'
+      ? linkTrustedCitations(message.content, sources.length, message.id)
+      : message.content
+    const text = role === 'assistant' && workflowMessageId === message.id && workflowMarkdown
+      ? `${workflowMarkdown}${answer ? `\n\n${answer}` : ''}`
+      : answer
     return {
       id: message.id,
       role,
       content: [
-        { type: 'text' as const, text: message.content },
+        { type: 'text' as const, text },
         ...sources.map((source, index) => ({
           type: 'source' as const,
           sourceType: 'document' as const,
-          id: `${source.documentId}:${source.chunkIndex ?? index}`,
-          title: source.fileName || `来源 ${index + 1}`,
+          id: `kr-source-${index + 1}-${message.id}`,
+          title: `[${index + 1}] ${source.fileName || '来源'}`,
           mediaType: 'application/octet-stream',
           filename: source.fileName || undefined,
         })),
       ],
       createdAt: new Date(message.createdAt),
     }
-  }, [])
+  }, [workflowMarkdown, workflowMessageId])
 
   const runtime = useExternalStoreRuntime({
     messages: threadMessages,
@@ -210,6 +322,7 @@ export function ChatPage() {
           const conversation = await api.conversations.create(activeKb)
           setConversationId(conversation.id)
           setSelectedSource(null)
+          setSelectedSourceMessageId(null)
           setSourcePanel(false)
           setProgressEvents([])
           await invalidateConversationLists()
@@ -218,6 +331,7 @@ export function ChatPage() {
           if (streaming) return
           setConversationId(id)
           setSelectedSource(null)
+          setSelectedSourceMessageId(null)
           setSourcePanel(false)
           setProgressEvents([])
           setMobileConversations(false)
@@ -252,7 +366,6 @@ export function ChatPage() {
     return <div className='space-y-6'><PageHeader eyebrow='RAG assistant' title='RAG 对话' description='先创建知识库并上传文档，再开始有来源依据的问答。' /><EmptyState icon={<Bot className='size-5 text-primary' />} title='没有可用知识库' description='创建知识库并完成向量化后，就可以开始对话。' /></div>
   }
 
-
   const showConversations = conversationsOpen && !focusMode
   const showSource = sourcePanel && !focusMode
 
@@ -269,8 +382,11 @@ export function ChatPage() {
     window.addEventListener('pointerup', onUp)
   }
 
-  const latestAssistantMessage = [...loadedMessages].reverse().find((message) => message.role.toLowerCase() === 'assistant')
-  const latestSources = latestAssistantMessage ? parseSources(latestAssistantMessage) : []
+  const selectLatestSource = () => {
+    if (!latestSourcedAssistantMessage || !latestSources.length) return
+    setSelectedSourceMessageId(latestSourcedAssistantMessage.id)
+    setSelectedSource(latestSources[0])
+  }
 
   const conversationList = <div className='flex h-full min-h-0 flex-col'>
     <div className='min-h-0 flex-1 overflow-y-auto p-3'>
@@ -310,23 +426,17 @@ export function ChatPage() {
 
             <div className='flex shrink-0 items-center gap-1'>
               <div className='w-32 sm:w-44 lg:w-52'><Select value={activeKb} onValueChange={setKbId}><SelectTrigger className='h-8 rounded-lg bg-muted/25'><SelectValue placeholder='选择知识库' /></SelectTrigger><SelectContent>{kbs.data?.map((kb) => <SelectItem value={kb.id} key={kb.id}>{kb.name}</SelectItem>)}</SelectContent></Select></div>
-              <Button size='icon-sm' variant={showSource ? 'secondary' : 'ghost'} className='hidden lg:inline-flex' aria-label={showSource ? '关闭来源证据' : '打开来源证据'} onClick={() => { if (!showSource && !selectedSource && latestSources.length) setSelectedSource(latestSources[0]); setSourcePanel((current) => !current) }}>
+              <Button size='icon-sm' variant={showSource ? 'secondary' : 'ghost'} className='hidden lg:inline-flex' aria-label={showSource ? '关闭来源证据' : '打开来源证据'} onClick={() => { if (showSource) setSourcePanel(false); else { if (!selectedSource) selectLatestSource(); setSourcePanel(true) } }}>
                 {showSource ? <PanelRightClose className='size-4' /> : <PanelRightOpen className='size-4' />}
               </Button>
-              {latestSources.length > 0 && <Button size='icon-sm' variant='ghost' aria-label='查看来源证据' className='lg:hidden' onClick={() => { if (!selectedSource) setSelectedSource(latestSources[0]); setMobileSource(true) }}><FileText className='size-4' /></Button>}
+              {latestSources.length > 0 && <Button size='icon-sm' variant='ghost' aria-label='查看来源证据' className='lg:hidden' onClick={() => { if (!selectedSource) selectLatestSource(); setMobileSource(true) }}><FileText className='size-4' /></Button>}
               <Button size='icon-sm' variant={focusMode ? 'secondary' : 'ghost'} aria-label={focusMode ? '退出专注模式' : '进入专注模式'} onClick={() => setFocusMode((current) => !current)}>
                 {focusMode ? <Minimize2 className='size-4' /> : <Maximize2 className='size-4' />}
               </Button>
             </div>
           </header>
 
-          <RunStatusBar
-            events={progressEvents}
-            running={streaming}
-            open={progressOpen}
-            onToggle={() => setProgressOpen((current) => !current)}
-          />
-          <div className='min-h-0 flex-1'>
+          <div className='min-h-0 flex-1' onClick={handleThreadClick}>
             <Thread autoFocus={!selectedArchived} />
           </div>
         </section>
@@ -337,16 +447,15 @@ export function ChatPage() {
             <div><div className='text-xs font-semibold'>来源证据</div><div className='max-w-64 truncate text-[10px] text-muted-foreground'>{selectedSource ? selectedSource.fileName : '选择一条引用查看证据'}</div></div>
             <Button size='icon-sm' variant='ghost' aria-label='关闭来源证据' onClick={() => setSourcePanel(false)}><X className='size-3.5' /></Button>
           </div>
-          <div className='source-panel-body min-h-0 flex-1 overflow-y-auto overscroll-contain'>{selectedSource ? <SourcePanel source={selectedSource} sources={latestSources} onSource={setSelectedSource} kbId={activeKb} /> : <SourceEmpty />}</div>
+          <div className='source-panel-body min-h-0 flex-1 overflow-y-auto overscroll-contain'>{selectedSource ? <SourcePanel source={selectedSource} sources={selectedSources} onSource={setSelectedSource} kbId={activeKb} /> : <SourceEmpty />}</div>
         </aside>}
       </div>
 
       {mobileConversations && <MobileDrawer title='Conversations' onClose={() => setMobileConversations(false)}>{conversationList}</MobileDrawer>}
-      {mobileSource && selectedSource && <MobileDrawer title='来源证据' side='right' onClose={() => setMobileSource(false)}><SourcePanel source={selectedSource} sources={latestSources} onSource={setSelectedSource} kbId={activeKb} /></MobileDrawer>}
+      {mobileSource && selectedSource && <MobileDrawer title='来源证据' side='right' onClose={() => setMobileSource(false)}><SourcePanel source={selectedSource} sources={selectedSources} onSource={setSelectedSource} kbId={activeKb} /></MobileDrawer>}
     </div>
   </AssistantRuntimeProvider>
 }
-
 
 function ArchivedThreads({ disabled }: { disabled: boolean }) {
   return <div className='mt-4 border-t pt-3'>
@@ -366,35 +475,6 @@ function ArchivedThreads({ disabled }: { disabled: boolean }) {
         </ThreadListItemPrimitive.Root>}
       </ThreadListPrimitive.Items>
     </ThreadListPrimitive.Root>
-  </div>
-}
-
-function RunStatusBar({ events, running, open, onToggle }: { events: RagProgressEvent[]; running: boolean; open: boolean; onToggle: () => void }) {
-  if (!events.length) return null
-  const queryCount = events.filter((event) => event.type === 'query.completed').length
-  const retrieval = [...events].reverse().find((event) => event.stage === 'retrieval' && event.status === 'completed')
-  const evidenceCount = typeof retrieval?.data?.evidenceCount === 'number' ? retrieval.data.evidenceCount : typeof retrieval?.data?.mergedEvidenceCount === 'number' ? retrieval.data.mergedEvidenceCount : undefined
-  const review = [...events].reverse().find((event) => event.stage === 'review' && event.type === 'agent.completed')
-  const workflow = [...events].reverse().find((event) => event.stepId === 'workflow')
-  const activeEvent = [...events].reverse().find((event) => event.status === 'running') || events[events.length - 1]
-  const summary = [queryCount ? `${queryCount} 个查询` : null, evidenceCount != null ? `${evidenceCount} 条证据` : null, review ? `Reviewer ${review.status === 'completed' ? '完成' : review.status}` : null].filter(Boolean).join(' · ')
-  const title = running ? 'Agent workflow running' : workflow?.status === 'failed' ? 'Agent workflow failed' : 'Agent workflow complete'
-
-  return <div data-testid='run-status-bar' className='relative z-20 shrink-0 border-b bg-background/88 px-3 py-1.5 backdrop-blur-xl'>
-    <button type='button' aria-expanded={open} onClick={onToggle} className='mx-auto flex h-8 w-full max-w-[50rem] items-center gap-2 rounded-lg px-2.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/60'>
-      {running ? <LoaderCircle className='size-3.5 shrink-0 animate-spin text-primary' /> : <span className={cn('size-2 shrink-0 rounded-full', workflow?.status === 'failed' ? 'bg-destructive' : 'bg-emerald-500')} />}
-      <span className='shrink-0 font-medium text-foreground'>{title}</span>
-      <span className='min-w-0 flex-1 truncate'>{activeEvent?.label || summary}</span>
-      {summary && <span className='hidden shrink-0 text-[10px] text-muted-foreground/80 md:inline'>{summary}</span>}
-      <ChevronDown className={cn('size-3.5 shrink-0 transition-transform', open && 'rotate-180')} />
-    </button>
-    {open && <div data-testid='run-status-details' role='region' aria-label='Agent workflow details' className='absolute inset-x-3 top-full z-30 mx-auto mt-1.5 max-h-56 max-w-[50rem] overflow-y-auto rounded-xl border bg-background/96 p-2.5 text-[11px] text-muted-foreground shadow-xl backdrop-blur-xl'>
-      {events.map((event, index) => <div key={`${event.stepId}-${event.type}-${index}`} className={cn('flex items-center gap-2 rounded-md px-2 py-1', event.status === 'running' && 'bg-primary/6')}>
-        <span className='w-20 shrink-0 font-medium text-foreground/70'>{event.stage}</span>
-        <span className='min-w-0 flex-1 truncate'>{event.label || event.type}</span>
-        <span className={cn('shrink-0 text-[10px]', event.status === 'running' && 'font-medium text-primary')}>{event.status}</span>
-      </div>)}
-    </div>}
   </div>
 }
 

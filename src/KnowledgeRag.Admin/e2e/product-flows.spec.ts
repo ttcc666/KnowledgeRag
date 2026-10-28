@@ -16,6 +16,8 @@ async function mockProductApi(page: Page) {
   let streamed = false
   let archived = false
   let title = 'Policy'
+  const source = { documentId: 'd1', fileName: 'handbook.pdf', chunkIndex: 3, sourceLink: '/file', score: .94, excerpt: `Employees receive the documented benefit.\n${'Additional source evidence for scrolling verification. '.repeat(90)}`, pageNumber: 7, vectorScore: .91, bm25Score: 5.4, fusionScore: .031, rerankScore: .94 }
+
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname
@@ -43,8 +45,7 @@ async function mockProductApi(page: Page) {
       return route.fulfill({ status: 204 })
     }
     if (path === '/api/conversations/c1/messages/page') {
-      const source = { documentId: 'd1', fileName: 'handbook.pdf', chunkIndex: 3, sourceLink: '/file', score: .94, excerpt: `Employees receive the documented benefit.\n${'Additional source evidence for scrolling verification. '.repeat(90)}`, pageNumber: 7, vectorScore: .91, bm25Score: 5.4, fusionScore: .031, rerankScore: .94 }
-      return route.fulfill({ json: streamed ? { messages: [{ id: 'm1', role: 'user', content: 'What is the policy?', createdAt: '2026-10-27T00:00:00Z' }, { id: 'm2', role: 'assistant', content: 'The **policy** answer [1].\n\n- Grounded in the handbook', sourcesJson: JSON.stringify([source]), createdAt: '2026-10-27T00:00:01Z' }], hasEarlier: false, previousCursor: null } : { messages: [], hasEarlier: false, previousCursor: null } })
+      return route.fulfill({ json: streamed ? { messages: [{ id: 'm2', role: 'assistant', content: 'The **policy** answer [1].\n\n- Grounded in the handbook', sourcesJson: JSON.stringify([source]), createdAt: '2026-10-27T00:00:00.1230000+00:00' }, { id: 'm1', role: 'user', content: 'What is the policy?', createdAt: '2026-10-27T00:00:00.1230000+00:00' }], hasEarlier: false, previousCursor: null } : { messages: [], hasEarlier: false, previousCursor: null } })
     }
     if (path === '/api/conversations/c1/messages/m2/feedback') return route.fulfill({ status: 204 })
     if (path === '/api/conversations/c1/messages/stream') {
@@ -61,7 +62,7 @@ async function mockProductApi(page: Page) {
         progress(7, 'review-1', 'review', 'agent.completed', 'EvidenceReviewerAgent', '证据审核通过', 'completed', { supported: true, confidence: .93, issueCount: 0 }, 90),
         progress(8, 'workflow', 'workflow', 'workflow.completed', 'KnowledgeRagWorkflow', '回答已完成', 'completed', { reviewPassed: true, evidenceCount: 4 }, 580),
         'event: delta\ndata: {"text":"The **policy** answer [1].\\n\\n- Grounded in the handbook"}\n\n',
-        'event: complete\ndata: {"conversationId":"c1","answer":"The **policy** answer [1].\\n\\n- Grounded in the handbook","sources":[]}\n\n',
+        `event: complete\ndata: ${JSON.stringify({ conversationId: 'c1', answer: 'The **policy** answer [1].\n\n- Grounded in the handbook', sources: [source] })}\n\n`,
       ].join('')
       return route.fulfill({ status: 200, contentType: 'text/event-stream', body })
     }
@@ -86,7 +87,7 @@ test('failed ingestion can be retried from operations', async ({ page }) => {
   await request
 })
 
-test('official assistant-ui Thread renders chat, sources, feedback and KnowledgeRag evidence', async ({ page }) => {
+test('official assistant-ui Thread renders ordered turns, in-message workflow, citations and evidence', async ({ page }) => {
   await page.goto('/chat')
   const isDesktop = await page.evaluate(() => window.innerWidth >= 1024)
   const thread = page.locator('.aui-thread-root')
@@ -105,32 +106,40 @@ test('official assistant-ui Thread renders chat, sources, feedback and Knowledge
   await page.getByRole('button', { name: 'Send message' }).click()
   await expect(page.getByText('policy', { exact: true }).last()).toBeVisible()
   await expect(page.getByText('Grounded in the handbook')).toBeVisible()
-  await expect(page.locator('[data-slot="source"]').filter({ hasText: 'handbook.pdf' })).toBeVisible()
 
-  const workflowToggle = page.getByRole('button', { name: /Agent workflow complete/ })
-  await expect(workflowToggle).toBeVisible()
-  await expect(page.getByTestId('run-status-details')).toHaveCount(0)
-  await workflowToggle.click()
-  await expect(page.getByTestId('run-status-details')).toBeVisible()
-  const workflowDetails = page.getByTestId('run-status-details')
-  await expect(workflowDetails.getByText('问题分析完成', { exact: true })).toBeVisible()
-  await expect(workflowDetails.getByText('检索、融合与重排完成', { exact: true })).toBeVisible()
-  await expect(workflowDetails.getByText('证据审核通过', { exact: true })).toBeVisible()
+  const messageRoots = page.locator('[data-slot="aui_message-group"] [data-role]')
+  await expect(messageRoots).toHaveCount(2)
+  expect(await messageRoots.evaluateAll((elements) => elements.map((element) => element.getAttribute('data-role')))).toEqual(['user', 'assistant'])
+
+  const assistantMessage = page.locator('[data-slot="aui_assistant-message-root"]')
+  await expect(assistantMessage.getByText('Agent workflow · 完成', { exact: false })).toBeVisible()
+  await expect(assistantMessage).toContainText('回答已完成')
+  await expect(page.getByTestId('run-status-bar')).toHaveCount(0)
+
+  const sourceChip = page.locator('a[data-slot="source"][href="#kr-source-1-m2"]')
+  const inlineCitation = page.locator('a[href="#kr-citation-1-m2"]')
+  await expect(sourceChip).toContainText('[1] handbook.pdf')
+  await expect(inlineCitation).toHaveText('1')
 
   const feedbackRequest = page.waitForRequest((request) => request.url().endsWith('/api/conversations/c1/messages/m2/feedback'))
   await page.getByRole('button', { name: 'Helpful', exact: true }).click()
   await feedbackRequest
 
+  await sourceChip.click()
+  if (isDesktop) await expect(page.getByTestId('source-panel')).toBeVisible()
+  else await expect(page.locator('div.fixed.inset-0.z-50.lg\\:hidden').filter({ hasText: '来源证据' })).toBeVisible()
+  await expect(page.getByText('Employees receive the documented benefit.', { exact: false }).last()).toBeVisible()
+
+  if (isDesktop) {
+    await page.getByTestId('source-panel').getByRole('button', { name: '关闭来源证据' }).click()
+    await expect(page.getByTestId('source-panel')).toHaveCount(0)
+    await inlineCitation.click()
+    await expect(page.getByTestId('source-panel')).toBeVisible()
+  }
+
   const documentScrolls = await page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight + 2)
   expect(documentScrolls).toBeFalsy()
   await expect(composer).toBeInViewport()
-
-  if (isDesktop) {
-    await page.getByRole('button', { name: '打开来源证据' }).click()
-  } else {
-    await page.getByRole('button', { name: '查看来源证据' }).click()
-  }
-  await expect(page.getByText('Employees receive the documented benefit.', { exact: false }).last()).toBeVisible()
 
   const activeSource = isDesktop
     ? page.getByTestId('source-panel')
@@ -168,10 +177,17 @@ test('official assistant-ui ThreadList can rename, archive and restore a convers
   await renameInput.press('Enter')
   await renameRequest
   const threadList = page.locator('[data-slot="aui_thread-list-root"]')
-  const renamedThread = threadList.locator('[data-slot="aui_thread-list-item"]').filter({ hasText: 'Renamed policy' })
+  let renamedThread = threadList.locator('[data-slot="aui_thread-list-item"]').filter({ hasText: 'Renamed policy' })
   await expect(renamedThread).toBeVisible()
 
+  await page.reload()
+  const stableThreadList = page.locator('[data-slot="aui_thread-list-root"]')
+  await expect(stableThreadList).toBeVisible()
+  renamedThread = stableThreadList.locator('[data-slot="aui_thread-list-item"]').filter({ hasText: 'Renamed policy' })
+  await expect(renamedThread).toBeVisible()
+  await renamedThread.hover()
   await renamedThread.getByRole('button', { name: 'More options' }).click()
+  await expect(page.locator('[data-slot="aui_thread-list-item-more-content"][data-state="open"]')).toBeVisible()
   const archiveRequest = page.waitForRequest((request) => request.url().endsWith('/api/conversations/c1/archive') && request.method() === 'POST')
   await page.getByRole('menuitem', { name: 'Archive', exact: true }).click()
   await archiveRequest
