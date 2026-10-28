@@ -18,6 +18,9 @@
 
 ### Added
 
+- 新增 **Citation-aware Evaluation v2**：Evaluation 与 Chat 共用 Structured Citation Contract，知识型 fact case 只有在答案引用当前 Evidence 且引用 ID 合法时才算 grounded，不再把“检索到了 Source”直接等价为“回答有依据”。
+- Evaluation `ResultsJson` 升级为 versioned schema（`schemaVersion=2` / `evaluatorVersion=citation-aware-v2`），记录逐 Case 检查项、retrieved/cited source 数、引用合法性、分类统计、no-answer accuracy、citation validity、RAG Profile 安全快照与 baseline regression delta。
+- 新增 Evaluation v2 确定性回归测试，覆盖“有检索但无引用”、有效 Evidence 引用、伪造 Evidence ID、正确 no-answer abstention 与错误强答。
 - 新增 **Versioned Document Index 原子激活**：重新索引时使用持久化入队时间戳生成稳定的 generation point ID，新一代向量完整构建后才切换激活 chunks；CAP 重试同一任务时复用同一 generation，避免重复制造 staging 向量。
 - 新增 document index generation ID 回归测试，覆盖同代重试稳定性、跨代/跨 chunk 隔离与非法输入。
 - 新增 **AI Usage Reservation / Ledger**：RAG Run 在 Agent 执行前先按 Planner、Embedding、LLM Reranker、Answer、Reviewer、Specialist 的最坏路径预留预算，执行后再按真实 Workflow 事件数量结算为逐模型 `estimated` usage line items。
@@ -30,6 +33,9 @@
 
 ### Changed
 
+- Evaluation grounding 从“`response.Sources.Count > 0` 或证据不足”升级为确定性 citation-aware 规则：可回答的知识型 Case 必须具备有效 Evidence Citation；`no-answer` Case 则必须正确 abstain 且不得伪造引用。
+- Evaluation 每次运行固定解析一次 RAG Profile，并只持久化 Planner/Reviewer 开关、检索参数、模型 ID、Agent mode 与 PromptProfileId；不持久化 managed prompt 正文。完成 Run 会与同 Dataset 上一次 completed Run 比较 pass rate、groundedness 与 latency（延迟回归阈值为 +20%）。
+- Evaluation 取消现在持久化为 `cancelled` 而不是与异常统一记为 `failed`；现有 `EvaluationRun` 聚合字段与 API 兼容保留，丰富指标写入 v2 `ResultsJson` 与 `evaluation.completed` webhook 元数据。
 - 文档 Reindex 从“先删除旧 chunks / vectors 再重建”改为 **staging generation → 完整构建 → 数据库事务原子替换 active chunks → best-effort 清理旧 vectors**；构建期间 BM25、PostgreSQL FTS 与 Hybrid Search 继续使用上一代激活索引。
 - Search 的“可检索文档”判断从 `Status == Ready` 改为已有激活 chunks（`ChunkCount > 0`）；因此正在重新索引、失败或取消的新任务状态不会让上一代有效索引暂时消失。
 - Hybrid Vector Search 在重索引期间扩大候选集，服务端仍通过当前激活的 `DocumentChunks` 确定性过滤 staging / orphan vector ID 后再执行 RRF 与 reranker。
@@ -47,6 +53,7 @@
 
 ### Fixed
 
+- 修复 Evaluation 将“检索到了任意 Source”视为 grounded，导致答案没有引用 Evidence、甚至引用错误 Evidence ID 时仍可能得到 grounding pass 的问题。
 - 修复重新索引过程中旧索引被提前删除，导致 embedding / vector store / DB 写入失败后文档失去上一代可用索引的问题；失败与取消现在仅清理当前 staging generation。
 - 修复 Reindex 将文档状态改为 `Queued/Processing` 后，搜索层因只接受 `Ready` 而在整个重建窗口暂时隐藏该文档的问题。
 - 修复数据库提交结果存在模糊异常时可能误删其实已经成功激活的新 generation vectors 的边界风险；清理前会先核对当前 DB chunks 是否已切换到 staging point IDs。
@@ -56,6 +63,7 @@
 
 ### Security
 
+- Evaluation Profile snapshot 明确排除 Planner / Answer / Reviewer managed prompt 正文，只保存非敏感运行配置与标识；评测详情同样不保存 chain-of-thought 或 secret。
 - Webhook 实际连接时重新解析 DNS，只允许公网地址，并阻止本机、私网、link-local、multicast、IPv6 unique-local 与 `.local` 目标；连接层检查降低 DNS rebinding / metadata endpoint SSRF 风险。
 - 非法或不存在的 Evidence 引用不会作为可信 Citation 返回前端；Knowledge Base 内容仍按 untrusted data 处理，管理员 Prompt 不能覆盖强制 grounding / citation 规则。
 
