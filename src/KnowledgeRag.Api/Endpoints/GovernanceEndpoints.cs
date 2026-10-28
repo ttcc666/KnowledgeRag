@@ -48,11 +48,17 @@ public static class GovernanceEndpoints
             return Results.Ok(hooks.Select(ToWebhookResponse));
         });
 
-        group.MapPost("/webhooks", async (Guid tenantId, ClaimsPrincipal principal, WebhookUpsert request, GovernanceService service, CancellationToken ct) =>
-            Results.Ok(ToWebhookResponse(await service.SaveWebhookAsync(HttpActorContext.From(principal), tenantId, request, ct))));
+        group.MapPost("/webhooks", async (Guid tenantId, ClaimsPrincipal principal, WebhookUpsert request, GovernanceService service, WebhookSecretProtector protector, CancellationToken ct) =>
+        {
+            var protectedRequest = request with { Secret = string.IsNullOrWhiteSpace(request.Secret) ? request.Secret : protector.Protect(request.Secret) };
+            return Results.Ok(ToWebhookResponse(await service.SaveWebhookAsync(HttpActorContext.From(principal), tenantId, protectedRequest, ct)));
+        });
 
-        group.MapPut("/webhooks/{webhookId:guid}", async (Guid tenantId, Guid webhookId, ClaimsPrincipal principal, WebhookUpsert request, GovernanceService service, CancellationToken ct) =>
-            Results.Ok(ToWebhookResponse(await service.SaveWebhookAsync(HttpActorContext.From(principal), tenantId, request with { Id = webhookId }, ct))));
+        group.MapPut("/webhooks/{webhookId:guid}", async (Guid tenantId, Guid webhookId, ClaimsPrincipal principal, WebhookUpsert request, GovernanceService service, WebhookSecretProtector protector, CancellationToken ct) =>
+        {
+            var protectedRequest = request with { Id = webhookId, Secret = string.IsNullOrWhiteSpace(request.Secret) ? request.Secret : protector.Protect(request.Secret) };
+            return Results.Ok(ToWebhookResponse(await service.SaveWebhookAsync(HttpActorContext.From(principal), tenantId, protectedRequest, ct)));
+        });
 
         group.MapDelete("/webhooks/{webhookId:guid}", async (Guid tenantId, Guid webhookId, ClaimsPrincipal principal, GovernanceService service, CancellationToken ct) =>
         {
