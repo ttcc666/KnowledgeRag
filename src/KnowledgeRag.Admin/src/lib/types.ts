@@ -12,7 +12,7 @@ export interface KnowledgeDocument { id: string; fileName: string; contentType: 
 export interface UploadResponse { documentId: string; fileName: string; chunkCount: number; sha256: string; status: DocumentStatus }
 export interface DocumentProcessingNotification { documentId: string; knowledgeBaseId: string; userId: string; fileName: string; status: DocumentStatus; progress: number; stage: string; chunkCount: number; error?: string | null; updatedAt: string }
 export interface SearchHit { pointId: string; documentId: string; fileName: string; chunkIndex: number; text: string; score: number; sourceLink: string; vectorScore?: number | null; bm25Score?: number | null; fusionScore?: number | null; rerankScore?: number | null; pageNumber?: number | null }
-export interface Conversation { id: string; knowledgeBaseId: string; title: string; createdAt: string; updatedAt: string }
+export interface Conversation { id: string; knowledgeBaseId: string; title: string; createdAt: string; updatedAt: string; archived?: boolean }
 export interface ChatSource { documentId: string; fileName: string; chunkIndex: number; sourceLink: string; score: number; excerpt: string; pageNumber?: number | null; vectorScore?: number | null; bm25Score?: number | null; fusionScore?: number | null; rerankScore?: number | null }
 export interface ChatResponse { conversationId: string; answer: string; sources: ChatSource[] }
 export interface RagProgressEvent {
@@ -28,6 +28,7 @@ export interface RagProgressEvent {
   data?: Record<string, unknown> | null
 }
 export interface ChatMessage { id: string; role: string; content: string; sourcesJson?: string | null; createdAt: string }
+export interface ChatMessagePage { messages: ChatMessage[]; hasEarlier: boolean; previousCursor?: string | null }
 export interface ApiKeySummary { id: string; name: string; keyPrefix: string; scopes: string[]; knowledgeBaseId?: string | null; isActive: boolean; createdAt: string; expiresAt?: string | null; lastUsedAt?: string | null }
 export interface CreatedApiKey { id: string; name: string; apiKey: string; scopes: string[]; knowledgeBaseId?: string | null; expiresAt?: string | null }
 
@@ -65,5 +66,6 @@ export interface PromptProfile { id: string; tenantId: string; knowledgeBaseId?:
 export interface WebhookProvider { id: string; name: string; description: string; urlPlaceholder: string; secretLabel: string; secretHint: string }
 export interface WebhookSubscription { id: string; tenantId: string; name: string; provider: string; url: string; eventTypes: string; isActive: boolean; lastStatusCode?: number | null; lastError?: string | null; lastDeliveredAt?: string | null; createdByUserId: string; createdAt: string; updatedAt: string }
 export interface EvaluationDataset { id: string; tenantId: string; knowledgeBaseId: string; name: string; description?: string | null; createdByUserId: string; createdAt: string; updatedAt: string }
-export interface EvaluationCase { id: string; datasetId: string; category: string; query: string; expectedAnswerContains?: string | null; requiresKnowledge: boolean; createdAt: string }
+export interface EvaluationExpectedSource { fileName: string; chunkIndex?: number | null }
+export interface EvaluationCase { id: string; datasetId: string; category: string; query: string; expectedAnswerContains?: string | null; expectedSources?: EvaluationExpectedSource[]; requiresKnowledge: boolean; createdAt: string }
 export interface EvaluationRun { id: string; datasetId: string; knowledgeBaseId: string; status: string; caseCount: number; passedCount: number; passRate: number; groundednessRate: number; averageLatencyMs: number; averageSourceCount: number; resultsJson: string; createdByUserId: string; createdAt: string; completedAt?: string | null }

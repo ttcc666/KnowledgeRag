@@ -1,8 +1,8 @@
 import axios, { AxiosError, type AxiosRequestConfig } from 'axios'
 import { useAuthStore } from '@/stores/auth-store'
 import type {
-  ApiKeySummary, AuditLog, AuthResponse, ChatMessage, ChatResponse, Conversation, CreatedApiKey,
-  DashboardSummary, EvaluationCase, EvaluationDataset, EvaluationRun, GovernanceOverview, IngestionJobSummary,
+  ApiKeySummary, AuditLog, AuthResponse, ChatMessage, ChatMessagePage, ChatResponse, Conversation, CreatedApiKey,
+  DashboardSummary, EvaluationCase, EvaluationDataset, EvaluationExpectedSource, EvaluationRun, GovernanceOverview, IngestionJobSummary,
   KnowledgeBaseMember, KnowledgeBaseSummary, KnowledgeDocument, ModelPrice, ProductSettingsSummary, PromptProfile,
   RagProfile, RagProfileUpdate, RagProgressEvent, RagRun, SearchHit, TenantMember, TenantSummary, UploadResponse,
   UserSummary, WebhookProvider, WebhookSubscription,
@@ -61,7 +61,19 @@ export const api = {
   ingestion: { jobs: async () => (await http.get<IngestionJobSummary[]>('/api/ingestion/jobs')).data },
   settings: { product: async () => (await http.get<ProductSettingsSummary>('/api/settings/product')).data },
   search: async (knowledgeBaseId: string, query: string, topK = 5) => (await http.post<SearchHit[]>('/api/search', { knowledgeBaseId, query, topK })).data,
-  conversations: { list: async (knowledgeBaseId?: string) => (await http.get<Conversation[]>('/api/conversations', { params: knowledgeBaseId ? { knowledgeBaseId } : {} })).data, create: async (knowledgeBaseId: string, title?: string) => (await http.post<Conversation>('/api/conversations', { knowledgeBaseId, title })).data, messages: async (id: string) => (await http.get<ChatMessage[]>(`/api/conversations/${id}/messages`)).data, send: async (id: string, message: string) => (await http.post<ChatResponse>(`/api/conversations/${id}/messages`, { message })).data, stream: streamConversation, remove: async (id: string) => { await http.delete(`/api/conversations/${id}`) } },
+  conversations: {
+    list: async (knowledgeBaseId?: string, archived = false) => (await http.get<Conversation[]>('/api/conversations', { params: { ...(knowledgeBaseId ? { knowledgeBaseId } : {}), archived } })).data,
+    create: async (knowledgeBaseId: string, title?: string) => (await http.post<Conversation>('/api/conversations', { knowledgeBaseId, title })).data,
+    rename: async (id: string, title: string) => (await http.patch<Conversation>(`/api/conversations/${id}`, { title })).data,
+    archive: async (id: string) => { await http.post(`/api/conversations/${id}/archive`) },
+    unarchive: async (id: string) => { await http.delete(`/api/conversations/${id}/archive`) },
+    messages: async (id: string) => (await http.get<ChatMessage[]>(`/api/conversations/${id}/messages`)).data,
+    messagePage: async (id: string, before?: string, limit = 50) => (await http.get<ChatMessagePage>(`/api/conversations/${id}/messages/page`, { params: { ...(before ? { before } : {}), limit } })).data,
+    send: async (id: string, message: string) => (await http.post<ChatResponse>(`/api/conversations/${id}/messages`, { message })).data,
+    stream: streamConversation,
+    feedback: async (conversationId: string, messageId: string, rating: 'positive' | 'negative') => { await http.post(`/api/conversations/${conversationId}/messages/${messageId}/feedback`, { rating }) },
+    remove: async (id: string) => { await http.delete(`/api/conversations/${id}`) },
+  },
   governance: {
     overview: async (tenantId: string) => (await http.get<GovernanceOverview>('/api/governance/overview', { params: { tenantId } })).data,
     ragProfile: async (knowledgeBaseId: string) => (await http.get<RagProfile>(`/api/governance/knowledge-bases/${knowledgeBaseId}/rag-profile`)).data,
@@ -80,7 +92,7 @@ export const api = {
     datasets: async (tenantId: string) => (await http.get<EvaluationDataset[]>('/api/governance/evaluation/datasets', { params: { tenantId } })).data,
     createDataset: async (tenantId: string, body: { knowledgeBaseId: string; name: string; description?: string }) => (await http.post<EvaluationDataset>('/api/governance/evaluation/datasets', body, { params: { tenantId } })).data,
     cases: async (tenantId: string, datasetId: string) => (await http.get<EvaluationCase[]>(`/api/governance/evaluation/datasets/${datasetId}/cases`, { params: { tenantId } })).data,
-    addCase: async (tenantId: string, datasetId: string, body: { category: string; query: string; expectedAnswerContains?: string; requiresKnowledge: boolean }) => (await http.post<EvaluationCase>(`/api/governance/evaluation/datasets/${datasetId}/cases`, body, { params: { tenantId } })).data,
+    addCase: async (tenantId: string, datasetId: string, body: { category: string; query: string; expectedAnswerContains?: string; expectedSources?: EvaluationExpectedSource[]; requiresKnowledge: boolean }) => (await http.post<EvaluationCase>(`/api/governance/evaluation/datasets/${datasetId}/cases`, body, { params: { tenantId } })).data,
     evaluationRuns: async (tenantId: string, datasetId?: string) => (await http.get<EvaluationRun[]>('/api/governance/evaluation/runs', { params: { tenantId, datasetId } })).data,
     runEvaluation: async (tenantId: string, datasetId: string) => (await http.post<EvaluationRun>(`/api/governance/evaluation/datasets/${datasetId}/run`, null, { params: { tenantId } })).data,
   },
