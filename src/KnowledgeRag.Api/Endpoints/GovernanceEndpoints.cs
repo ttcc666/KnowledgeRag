@@ -78,8 +78,18 @@ public static class GovernanceEndpoints
         group.MapPost("/webhooks/{webhookId:guid}/test", async (Guid tenantId, Guid webhookId, ClaimsPrincipal principal, TenantAccessService access, WebhookAutomationService webhooks, CancellationToken ct) =>
         {
             await access.RequireAsync(HttpActorContext.From(principal), tenantId, TenantRole.Admin, ct);
-            await webhooks.TestAsync(tenantId, webhookId, ct);
-            return Results.Accepted();
+            try
+            {
+                await webhooks.TestAsync(tenantId, webhookId, ct);
+                return Results.Accepted();
+            }
+            catch (WebhookDeliveryTimeoutException ex)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status504GatewayTimeout,
+                    title: "Webhook 请求超时",
+                    detail: ex.Message);
+            }
         });
 
         group.MapGet("/evaluation/datasets", async (Guid tenantId, ClaimsPrincipal principal, GovernanceService service, CancellationToken ct) =>
