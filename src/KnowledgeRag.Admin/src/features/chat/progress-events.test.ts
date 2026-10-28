@@ -22,6 +22,18 @@ describe('mergeProgressEvent', () => {
     expect(mergeProgressEvent([started], completed)).toEqual([completed])
   })
 
+  it('moves an updated step to its latest SSE sequence position', () => {
+    const workflowStarted = event('workflow', 1, 'running', 'workflow')
+    const retrievalCompleted = event('retrieval', 6, 'completed')
+    const workflowCompleted = event('workflow', 8, 'completed', 'workflow')
+    const result = mergeProgressEvent([workflowStarted, retrievalCompleted], workflowCompleted)
+    expect(result.map((item) => [item.stepId, item.sequence])).toEqual([
+      ['retrieval', 6],
+      ['workflow', 8],
+    ])
+    expect(result.at(-1)?.label).toBe('回答已完成')
+  })
+
   it('keeps parallel query steps as separate timeline rows', () => {
     const result = mergeProgressEvent([event('query-1', 1, 'running')], event('query-2', 2, 'running'))
     expect(result.map((item) => item.stepId)).toEqual(['query-1', 'query-2'])
@@ -48,6 +60,9 @@ describe('mergeProgressEvent', () => {
 
   it('bounds long repair timelines', () => {
     const events = Array.from({ length: 80 }, (_, index) => event(`step-${index}`, index + 1, 'completed'))
-    expect(mergeProgressEvent(events, event('last', 81, 'running'))).toHaveLength(80)
+    const result = mergeProgressEvent(events, event('last', 81, 'running'))
+    expect(result).toHaveLength(80)
+    expect(result[0].sequence).toBe(2)
+    expect(result.at(-1)?.sequence).toBe(81)
   })
 })
