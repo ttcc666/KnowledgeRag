@@ -54,7 +54,7 @@ public sealed class PostgresFtsSearchService : ILexicalSearchService
             FROM "DocumentChunks" c
             JOIN "Documents" d ON d."Id" = c."DocumentId"
             WHERE c."KnowledgeBaseId" = @kb
-              AND d."Status" = 'Ready'
+              AND d."ChunkCount" > 0
               AND to_tsvector('{config}'::regconfig, c."Text") @@ plainto_tsquery('{config}'::regconfig, @query)
             ORDER BY score DESC
             LIMIT @limit

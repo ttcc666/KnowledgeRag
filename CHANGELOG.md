@@ -18,6 +18,8 @@
 
 ### Added
 
+- 新增 **Versioned Document Index 原子激活**：重新索引时使用持久化入队时间戳生成稳定的 generation point ID，新一代向量完整构建后才切换激活 chunks；CAP 重试同一任务时复用同一 generation，避免重复制造 staging 向量。
+- 新增 document index generation ID 回归测试，覆盖同代重试稳定性、跨代/跨 chunk 隔离与非法输入。
 - 新增 **AI Usage Reservation / Ledger**：RAG Run 在 Agent 执行前先按 Planner、Embedding、LLM Reranker、Answer、Reviewer、Specialist 的最坏路径预留预算，执行后再按真实 Workflow 事件数量结算为逐模型 `estimated` usage line items。
 - 新增跨数据库预算策略回归测试，覆盖正在执行的 `reserved` Run 计入每日配额、预留成本计入月预算以及 Workflow 事件驱动的 usage 统计。
 - 新增 Webhook **CAP 异步投递管线**：每个订阅独立发布 delivery message，PostgreSQL 环境复用 CAP 持久化 storage / RabbitMQ 重试，避免外部 HTTP 阻塞 Chat / Evaluation 请求关键路径。
@@ -28,6 +30,9 @@
 
 ### Changed
 
+- 文档 Reindex 从“先删除旧 chunks / vectors 再重建”改为 **staging generation → 完整构建 → 数据库事务原子替换 active chunks → best-effort 清理旧 vectors**；构建期间 BM25、PostgreSQL FTS 与 Hybrid Search 继续使用上一代激活索引。
+- Search 的“可检索文档”判断从 `Status == Ready` 改为已有激活 chunks（`ChunkCount > 0`）；因此正在重新索引、失败或取消的新任务状态不会让上一代有效索引暂时消失。
+- Hybrid Vector Search 在重索引期间扩大候选集，服务端仍通过当前激活的 `DocumentChunks` 确定性过滤 staging / orphan vector ID 后再执行 RRF 与 reranker。
 - Budget / Daily Quota 从“执行前读取历史后判断”改为 **Serializable Transaction 预留 → 执行 → 结算**；并发会话会看到彼此的 reservation，降低多个 Run 同时越过剩余配额/预算的竞态风险。
 - RAG Run Trace 增加安全的 `usage.ledger`，保存 operation、model、calls、input/output token estimate、cost 与 `estimated=true`，不保存 prompt、chain-of-thought 或 secret；失败/取消的 Run 同样结算已观察到的调用，过期 reservation 自动释放。
 - Embedding 在没有显式 Model Price 时不再错误套用 Chat token 单价；Chat-based Planner / Answer / Reviewer / Specialist / LLM Reranker 继续使用模型价格或现有 Chat fallback。
@@ -42,6 +47,9 @@
 
 ### Fixed
 
+- 修复重新索引过程中旧索引被提前删除，导致 embedding / vector store / DB 写入失败后文档失去上一代可用索引的问题；失败与取消现在仅清理当前 staging generation。
+- 修复 Reindex 将文档状态改为 `Queued/Processing` 后，搜索层因只接受 `Ready` 而在整个重建窗口暂时隐藏该文档的问题。
+- 修复数据库提交结果存在模糊异常时可能误删其实已经成功激活的新 generation vectors 的边界风险；清理前会先核对当前 DB chunks 是否已切换到 staging point IDs。
 - 修复并发 Conversation 仅依赖进程内 conversation lock 时，不同会话可能同时通过同一 Knowledge Base 的预算/每日配额检查并造成超额的问题。
 - 修复 SQLite 下 `RagRuntimeProfileService.EstimateCostAsync` 对 `DateTimeOffset UpdatedAt` 执行数据库端 `ORDER BY` 时抛出 `NotSupportedException`，导致 RAG 回答完成后在持久化 Run Trace / Cost 阶段返回 HTTP 500 的问题。
 - 增加 SQLite 集成回归，直接验证配置模型价格后的成本估算路径可正常执行并使用正确价格。
