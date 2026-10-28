@@ -15,6 +15,18 @@ export interface SearchHit { pointId: string; documentId: string; fileName: stri
 export interface Conversation { id: string; knowledgeBaseId: string; title: string; createdAt: string; updatedAt: string }
 export interface ChatSource { documentId: string; fileName: string; chunkIndex: number; sourceLink: string; score: number; excerpt: string; pageNumber?: number | null; vectorScore?: number | null; bm25Score?: number | null; fusionScore?: number | null; rerankScore?: number | null }
 export interface ChatResponse { conversationId: string; answer: string; sources: ChatSource[] }
+export interface RagProgressEvent {
+  runId: string
+  sequence: number
+  stepId: string
+  stage: string
+  type: string
+  actor: string
+  label: string
+  status: string
+  elapsedMs?: number | null
+  data?: Record<string, unknown> | null
+}
 export interface ChatMessage { id: string; role: string; content: string; sourcesJson?: string | null; createdAt: string }
 export interface ApiKeySummary { id: string; name: string; keyPrefix: string; scopes: string[]; knowledgeBaseId?: string | null; isActive: boolean; createdAt: string; expiresAt?: string | null; lastUsedAt?: string | null }
 export interface CreatedApiKey { id: string; name: string; apiKey: string; scopes: string[]; knowledgeBaseId?: string | null; expiresAt?: string | null }
