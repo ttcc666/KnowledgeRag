@@ -1,0 +1,39 @@
+name: import-assistant-ui-thread-list-sidebar
+
+on:
+  push:
+    branches:
+      - fix/chat-workspace-layout-polish
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/KnowledgeRag.Admin
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/chat-workspace-layout-polish
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/KnowledgeRag.Admin/package-lock.json
+      - run: npm ci
+      - name: Import official assistant-ui sidebar
+        run: npx assistant-ui@latest add thread-list-sidebar -y
+      - name: Commit registry output
+        working-directory: .
+        run: |
+          rm .github/workflows/import-thread-list-sidebar.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "refactor(chat): import official assistant-ui thread list sidebar"
+          git push origin HEAD:fix/chat-workspace-layout-polish
