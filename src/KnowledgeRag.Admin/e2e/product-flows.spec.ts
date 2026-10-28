@@ -118,8 +118,13 @@ test('official assistant-ui Thread renders ordered turns, in-message workflow, c
 
   const sourceChip = page.locator('a[data-slot="source"][href="#kr-source-1-m2"]')
   const inlineCitation = page.locator('a[href="#kr-citation-1-m2"]')
+  await expect(sourceChip).toContainText('引用')
   await expect(sourceChip).toContainText('[1] handbook.pdf')
-  await expect(inlineCitation).toHaveText('1')
+  await expect(sourceChip).toHaveAttribute('aria-label', '查看引用 [1] handbook.pdf')
+  await expect(inlineCitation).toHaveText('[1]')
+  await expect(page.locator('.aui-branch-picker-root')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Edit' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Refresh' })).toHaveCount(0)
 
   const feedbackRequest = page.waitForRequest((request) => request.url().endsWith('/api/conversations/c1/messages/m2/feedback'))
   await page.getByRole('button', { name: 'Helpful', exact: true }).click()

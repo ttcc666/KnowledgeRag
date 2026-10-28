@@ -154,15 +154,23 @@ const defaultComponents = memoizeMarkdownComponents({
       {...props}
     />
   ),
-  a: ({ className, ...props }) => (
-    <a
-      className={cn(
-        "aui-md-a text-primary hover:text-primary/80 underline underline-offset-2",
-        className,
-      )}
-      {...props}
-    />
-  ),
+  a: ({ className, href, children, ...props }) => {
+    const citation = typeof href === "string" && href.startsWith("#kr-citation-");
+    return (
+      <a
+        href={href}
+        className={cn(
+          citation
+            ? "aui-md-citation text-primary font-medium no-underline hover:underline underline-offset-2"
+            : "aui-md-a text-primary hover:text-primary/80 underline underline-offset-2",
+          className,
+        )}
+        {...props}
+      >
+        {citation ? <>[{children}]</> : children}
+      </a>
+    );
+  },
   blockquote: ({ className, ...props }) => (
     <blockquote
       className={cn(

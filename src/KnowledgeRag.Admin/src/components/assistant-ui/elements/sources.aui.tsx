@@ -182,6 +182,7 @@ const SourcesImpl: SourceMessagePartComponent = (part) => {
   if (part.sourceType === "document") {
     const content = (
       <>
+        <span className="text-muted-foreground">引用</span>
         <DocumentSourceIcon />
         <SourceTitle>{part.title}</SourceTitle>
       </>
@@ -196,8 +197,9 @@ const SourcesImpl: SourceMessagePartComponent = (part) => {
           href={localHref}
           target="_self"
           rel={undefined}
-          variant="secondary"
-          className="gap-1.5 no-underline"
+          variant="ghost"
+          aria-label={`查看引用 ${part.title}`}
+          className="h-auto gap-1.5 rounded-none px-0 py-0 text-primary no-underline hover:bg-transparent hover:text-primary/80 hover:underline underline-offset-2"
         >
           {content}
         </Source>

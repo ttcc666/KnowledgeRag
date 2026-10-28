@@ -75,6 +75,10 @@
 
 ### Fixed
 
+- 修复 Chat Header 与 assistant turn 重复显示运行状态的问题；Agent Workflow 只在当前回答消息内以紧凑两行摘要呈现，通用 running indicator 仅保留无障碍文本，不再出现额外圆点。
+- 修复 External Store 未提供 branching/edit/reload 能力时仍出现 `2 / 2` BranchPicker、Edit / Refresh 控件的问题；assistant-ui UI 现在按 runtime capability 显示对应操作。
+- 改进 Chat 引用呈现：正文可信引用保留可见 `[n]` 并作为链接打开对应 Evidence，回答底部文档来源改为“引用 [n] 文件名”的轻量链接，不再使用填充 badge。
+- Structured Citation Contract 支持 `[E1, E2]` 组合 Evidence 引用并确定性展开为稳定用户引用；组合中的越界或畸形 Evidence 标记继续计为非法引用并触发既有 Final Citation Gate fail-closed。
 - 修复 Agent Workflow 与实际对话分离、Citation Gate 等待期间只显示孤立 loading indicator 的问题；运行开始即创建当前 assistant turn，并把安全的 Planner / Retrieval / Answer / Reviewer 状态作为这条消息的一部分实时更新，最终正文仍只在 Citation Gate 通过后出现。
 - 改进 Chat 运行中状态：assistant-ui 官方 running indicator 在 KnowledgeRag workspace 中改为紧凑 spinner + “正在处理”，不再显示无语义的单独 `●`。
 - 修复同一轮 user / assistant 时间戳在 SQLite `julianday` 或浏览器毫秒精度下折叠后可能倒序的问题；新消息持久化使用可见的毫秒间隔，SQLite/PostgreSQL 查询增加 Role/Id 确定性 tie-breaker，前端分页合并再执行去重和稳定排序，保证 user → assistant。
