@@ -1,38 +1,46 @@
-name: lockgen-assistant-markdown
+name: record-markdown-webhook-changelog
 
 on:
   push:
     branches:
       - fix/assistant-ui-markdown-webhook-timeout
     paths:
-      - src/KnowledgeRag.Admin/package.json
       - .github/workflows/lockgen-assistant-markdown.yml
 
 permissions:
   contents: write
 
 jobs:
-  lockfile:
+  changelog:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
           ref: fix/assistant-ui-markdown-webhook-timeout
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: src/KnowledgeRag.Admin/package-lock.json
-      - name: Regenerate package lock
-        working-directory: src/KnowledgeRag.Admin
-        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-      - name: Commit lockfile
+      - name: Update Unreleased changelog
+        shell: python
         run: |
-          if git diff --quiet -- src/KnowledgeRag.Admin/package-lock.json; then
+          from pathlib import Path
+
+          path = Path('CHANGELOG.md')
+          text = path.read_text(encoding='utf-8')
+
+          changed = '- Chat assistant answer 改用 assistant-ui 官方 `MarkdownTextPrimitive` + GFM 渲染，不再维护手写 Markdown parser；Source Evidence Panel 使用同一标准 Markdown 语义渲染标题、列表、代码块、表格等，同时保持普通链接/远程图片不可交互或加载。\n'
+          fixed = '- Webhook 原生 HTTP 投递超过配置的 8 秒超时时，不再以未分类 `TaskCanceledException` 记录；现在保存明确的 Request Timeout 状态并抛出可重试 `WebhookDeliveryTimeoutException` 供 CAP 重试，手动 Webhook Test API 返回 504。\n'
+
+          if changed not in text:
+              text = text.replace('### Changed\n\n', '### Changed\n\n' + changed, 1)
+          if fixed not in text:
+              text = text.replace('### Fixed\n\n', '### Fixed\n\n' + fixed, 1)
+
+          path.write_text(text, encoding='utf-8')
+      - name: Commit changelog
+        run: |
+          if git diff --quiet -- CHANGELOG.md; then
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/KnowledgeRag.Admin/package-lock.json
-          git commit -m "chore(frontend): update markdown dependency lockfile"
+          git add CHANGELOG.md
+          git commit -m "docs: record markdown and webhook timeout fixes"
           git push origin HEAD:fix/assistant-ui-markdown-webhook-timeout
