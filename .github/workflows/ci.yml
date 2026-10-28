@@ -2,55 +2,183 @@ name: ci
 
 on:
   push:
+    branches:
+      - main
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - converted_to_draft
   workflow_dispatch:
+  schedule:
+    - cron: '17 7 * * *'
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      frontend: ${{ steps.classify.outputs.frontend }}
+      backend: ${{ steps.classify.outputs.backend }}
+      native: ${{ steps.classify.outputs.native }}
+      full: ${{ steps.classify.outputs.full }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Classify changed files
+        id: classify
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+
+          frontend=false
+          backend=false
+          native=false
+          full=false
+
+          # main, manual and nightly runs are always full. A non-draft PR is also a
+          # merge candidate, so every update to it gets the complete validation set.
+          if [[ "$EVENT_NAME" == "push" || "$EVENT_NAME" == "workflow_dispatch" || "$EVENT_NAME" == "schedule" ]]; then
+            full=true
+          elif [[ "$EVENT_NAME" == "pull_request" && "$PR_DRAFT" != "true" ]]; then
+            full=true
+          fi
+
+          if [[ "$full" == "true" ]]; then
+            frontend=true
+            backend=true
+            native=true
+          else
+            if [[ -z "${BASE_SHA:-}" || "$BASE_SHA" == "0000000000000000000000000000000000000000000" ]]; then
+              files="$(git ls-files)"
+            else
+              files="$(git diff --name-only "$BASE_SHA" HEAD)"
+            fi
+
+            echo "Changed files:"
+            printf '%s\n' "$files"
+
+            while IFS= read -r file; do
+              [[ -z "$file" ]] && continue
+
+              case "$file" in
+                .github/workflows/*)
+                  frontend=true
+                  backend=true
+                  native=true
+                  ;;
+                src/KnowledgeRag.Admin/*)
+                  frontend=true
+                  ;;
+                src/KnowledgeRag.Api/*|src/KnowledgeRag.Application/*|src/KnowledgeRag.Infrastructure/*|src/KnowledgeRag.Domain/*|tests/*|*.sln|*.csproj|Directory.*|global.json)
+                  backend=true
+                  ;;
+              esac
+
+              case "$file" in
+                src/KnowledgeRag.Infrastructure/*|src/KnowledgeRag.Domain/*|src/KnowledgeRag.Api/Program.cs|src/KnowledgeRag.Api/appsettings*|tests/KnowledgeRag.Api.IntegrationTests/ExternalBackendTests.cs|docker-compose*.yml|Dockerfile|*.csproj|.github/workflows/*)
+                  native=true
+                  ;;
+              esac
+            done <<< "$files"
+          fi
+
+          echo "frontend=$frontend" >> "$GITHUB_OUTPUT"
+          echo "backend=$backend" >> "$GITHUB_OUTPUT"
+          echo "native=$native" >> "$GITHUB_OUTPUT"
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+
+          echo "Classification: frontend=$frontend backend=$backend native=$native full=$full"
+
   build-test:
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: CI scope
+        run: |
+          echo "frontend=${{ needs.changes.outputs.frontend }}"
+          echo "backend=${{ needs.changes.outputs.backend }}"
+          echo "full=${{ needs.changes.outputs.full }}"
+
       - uses: actions/checkout@v4
+        if: ${{ needs.changes.outputs.frontend == 'true' || needs.changes.outputs.backend == 'true' }}
+
       - uses: actions/setup-dotnet@v4
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         with:
           dotnet-version: '10.0.x'
           cache: true
           cache-dependency-path: '**/*.csproj'
+
       - uses: actions/setup-node@v4
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: src/KnowledgeRag.Admin/package-lock.json
+
       - name: Install frontend dependencies
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
         working-directory: src/KnowledgeRag.Admin
         run: npm ci --no-audit --no-fund
+
       - name: Build frontend
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
         working-directory: src/KnowledgeRag.Admin
         run: npm run build
+
       - name: Unit and accessibility tests
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
         working-directory: src/KnowledgeRag.Admin
         run: npm test
+
       - name: Install Playwright Chromium
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
         working-directory: src/KnowledgeRag.Admin
         run: npx playwright install --with-deps chromium
+
       - name: Browser smoke tests
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
         working-directory: src/KnowledgeRag.Admin
         run: npm run test:e2e
+
       - name: Restore
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         run: dotnet restore KnowledgeRag.NonAzure.sln
       - name: Build
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         run: dotnet build KnowledgeRag.NonAzure.sln -c Release --no-restore
+
       - name: Test
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         run: dotnet test KnowledgeRag.NonAzure.sln -c Release --no-build --logger 'trx;LogFileName=test-results.trx'
+
       - name: Upload test results
-        if: always()
+        if: ${{ always() && needs.changes.outputs.backend == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: test-results
           path: '**/TestResults/*.trx'
           if-no-files-found: ignore
 
+      - name: No code tests required
+        if: ${{ needs.changes.outputs.frontend != 'true' && needs.changes.outputs.backend != 'true' }}
+        run: echo 'Documentation-only draft change; heavy build/test steps are intentionally skipped.'
+
   native-backends-smoke:
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -66,15 +194,25 @@ jobs:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       RUN_EXTERNAL_BACKEND_TESTS: '1'
     steps:
+      - name: Native CI scope
+        run: echo "native=${{ needs.changes.outputs.native }} full=${{ needs.changes.outputs.full }}"
+
       - uses: actions/checkout@v4
+        if: ${{ needs.changes.outputs.native == 'true' }}
+
       - uses: actions/setup-dotnet@v4
+        if: ${{ needs.changes.outputs.native == 'true' }}
         with:
           dotnet-version: '10.0.x'
           cache: true
           cache-dependency-path: '**/*.csproj'
+
       - name: Start PostgreSQL, RabbitMQ and OpenTelemetry
+        if: ${{ needs.changes.outputs.native == 'true' }}
         run: docker compose --profile postgres --profile cap --profile otel up -d postgres rabbitmq otel-collector
+
       - name: Wait for PostgreSQL and RabbitMQ
+        if: ${{ needs.changes.outputs.native == 'true' }}
         shell: bash
         run: |
           for i in {1..40}; do
@@ -87,15 +225,21 @@ jobs:
             sleep 2
           done
           docker compose exec -T rabbitmq rabbitmq-diagnostics -q ping
+
       - name: Export native backend connection strings
+        if: ${{ needs.changes.outputs.native == 'true' }}
         shell: bash
         run: |
           DB_SECRET="$(docker compose exec -T postgres sh -lc 'printf %s "$POSTGRES_PASSWORD"')"
           printf 'DATABASE_CONNECTION_STRING=Host=postgres;Port=5432;Database=%s;Username=%s;Password=%s\n' "$POSTGRES_DB" "$POSTGRES_USER" "$DB_SECRET" >> "$GITHUB_ENV"
           printf 'EXTERNAL_DATABASE_CONNECTION_STRING=Host=localhost;Port=5432;Database=%s;Username=%s;Password=%s\n' "$POSTGRES_DB" "$POSTGRES_USER" "$DB_SECRET" >> "$GITHUB_ENV"
+
       - name: Build and start application with native backends and CAP RabbitMQ
+        if: ${{ needs.changes.outputs.native == 'true' }}
         run: docker compose --profile postgres --profile cap --profile otel up -d --build app
+
       - name: Readiness check
+        if: ${{ needs.changes.outputs.native == 'true' }}
         shell: bash
         run: |
           for i in {1..60}; do
@@ -108,13 +252,23 @@ jobs:
           done
           docker compose logs app postgres rabbitmq otel-collector
           exit 1
+
       - name: Verify CAP PostgreSQL schema exists
+        if: ${{ needs.changes.outputs.native == 'true' }}
         run: docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select table_schema, table_name from information_schema.tables where table_schema = 'cap' order by table_name;" | tee /tmp/cap-tables.txt && grep -q cap /tmp/cap-tables.txt
+
       - name: Exercise pgvector and PostgreSQL FTS through project code
+        if: ${{ needs.changes.outputs.native == 'true' }}
         run: dotnet test tests/KnowledgeRag.Api.IntegrationTests/KnowledgeRag.Api.IntegrationTests.csproj -c Release --filter Category=ExternalBackend
+
       - name: Logs on failure
-        if: failure()
+        if: ${{ failure() && needs.changes.outputs.native == 'true' }}
         run: docker compose logs app postgres rabbitmq otel-collector
+
       - name: Shutdown
-        if: always()
+        if: ${{ always() && needs.changes.outputs.native == 'true' }}
         run: docker compose --profile postgres --profile cap --profile otel down -v
+
+      - name: Native smoke not required
+        if: ${{ needs.changes.outputs.native != 'true' }}
+        run: echo 'No native-sensitive changes in this Draft PR; native backend smoke is intentionally skipped.'
