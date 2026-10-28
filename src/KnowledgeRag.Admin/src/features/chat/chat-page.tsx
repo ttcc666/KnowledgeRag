@@ -6,16 +6,17 @@ import {
   ThreadListPrimitive,
   useExternalStoreRuntime,
 } from '@assistant-ui/react'
-import { Archive, ArchiveRestore, Bot, FileText, Maximize2, Menu, MessageSquarePlus, Minimize2, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pencil, Trash2, X } from 'lucide-react'
+import { ArchiveRestore, Bot, ChevronDown, FileText, LoaderCircle, Maximize2, Menu, Minimize2, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Trash2, X } from 'lucide-react'
 import { motion } from 'motion/react'
 import { toast } from 'sonner'
-import { AssistantThread } from './assistant-thread'
+import { Thread } from '@/components/assistant-ui/elements/thread.aui'
+import { ThreadList } from '@/components/assistant-ui/elements/thread-list.aui'
 import { SourceExcerptMarkdown } from './chat-markdown'
 import { flattenMessagePages, resolveRuntimeThreadId } from './chat-runtime-state'
 import { mergeProgressEvent } from './progress-events'
 import { api, getErrorMessage } from '@/lib/api'
-import { cn, formatDate } from '@/lib/utils'
-import type { ChatMessage, ChatSource, Conversation, RagProgressEvent } from '@/lib/types'
+import { cn } from '@/lib/utils'
+import type { ChatMessage, ChatSource, RagProgressEvent } from '@/lib/types'
 import { Button, EmptyState, PageHeader, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui'
 
 function parseSources(message: ChatMessage): ChatSource[] {
@@ -153,18 +154,37 @@ export function ChatPage() {
     return history
   }, [loadedMessages, liveUser, liveAnswer, streaming])
 
-  const convertMessage = useCallback((message: ChatMessage) => ({
-    id: message.id,
-    role: message.role.toLowerCase() === 'user' ? 'user' as const : 'assistant' as const,
-    content: [{ type: 'text' as const, text: message.content }],
-    createdAt: new Date(message.createdAt),
-  }), [])
+  const convertMessage = useCallback((message: ChatMessage) => {
+    const role = message.role.toLowerCase() === 'user' ? 'user' as const : 'assistant' as const
+    const sources = role === 'assistant' ? parseSources(message) : []
+    return {
+      id: message.id,
+      role,
+      content: [
+        { type: 'text' as const, text: message.content },
+        ...sources.map((source, index) => ({
+          type: 'source' as const,
+          sourceType: 'document' as const,
+          id: `${source.documentId}:${source.chunkIndex ?? index}`,
+          title: source.fileName || `来源 ${index + 1}`,
+          mediaType: 'application/octet-stream',
+          filename: source.fileName || undefined,
+        })),
+      ],
+      createdAt: new Date(message.createdAt),
+    }
+  }, [])
 
   const runtime = useExternalStoreRuntime({
     messages: threadMessages,
     isRunning: streaming,
     isLoading: !!runtimeThreadId && messages.isLoading,
     isSendDisabled: streaming || !activeKb || selectedArchived || (!!conversationId && !runtimeThreadId),
+    suggestions: [
+      { prompt: '总结这个知识库' },
+      { prompt: '有哪些关键主题？' },
+      { prompt: '帮我比较相关文档' },
+    ],
     convertMessage,
     onNew: async (message) => {
       const textPart = message.content.find((part) => part.type === 'text')
@@ -186,8 +206,8 @@ export function ChatPage() {
       threadList: {
         threadId: runtimeThreadId,
         isLoading: conversations.isLoading || archivedConversations.isLoading,
-        threads: (conversations.data || []).map((item) => ({ id: item.id, status: 'regular' as const, title: item.title })),
-        archivedThreads: (archivedConversations.data || []).map((item) => ({ id: item.id, status: 'archived' as const, title: item.title })),
+        threads: (conversations.data || []).map((item) => ({ id: item.id, status: 'regular' as const, title: item.title, lastMessageAt: new Date(item.updatedAt) })),
+        archivedThreads: (archivedConversations.data || []).map((item) => ({ id: item.id, status: 'archived' as const, title: item.title, lastMessageAt: new Date(item.updatedAt) })),
         onSwitchToNewThread: async () => {
           if (streaming || !activeKb) return
           const conversation = await api.conversations.create(activeKb)
@@ -235,11 +255,6 @@ export function ChatPage() {
     return <div className='space-y-6'><PageHeader eyebrow='RAG assistant' title='RAG 对话' description='先创建知识库并上传文档，再开始有来源依据的问答。' /><EmptyState icon={<Bot className='size-5 text-primary' />} title='没有可用知识库' description='创建知识库并完成向量化后，就可以开始对话。' /></div>
   }
 
-  const onSource = (source: ChatSource) => {
-    setSelectedSource(source)
-    if (window.innerWidth < 1024) setMobileSource(true)
-    else setSourcePanel(true)
-  }
 
   const showConversations = conversationsOpen && !focusMode
   const showSource = sourcePanel && !focusMode
@@ -257,26 +272,15 @@ export function ChatPage() {
     window.addEventListener('pointerup', onUp)
   }
 
-  const sourcesByMessageId = useMemo(() => Object.fromEntries(loadedMessages.map((message) => [message.id, parseSources(message)])), [loadedMessages])
-  const traceMessageId = streaming
-    ? 'live-assistant'
-    : [...loadedMessages].reverse().find((message) => message.role.toLowerCase() === 'assistant')?.id || ''
+  const latestAssistantMessage = [...loadedMessages].reverse().find((message) => message.role.toLowerCase() === 'assistant')
+  const latestSources = latestAssistantMessage ? parseSources(latestAssistantMessage) : []
 
-  const conversationList = <ConversationList
-    regular={conversations.data || []}
-    archived={archivedConversations.data || []}
-    disabled={streaming}
-    onRename={async (id, currentTitle) => {
-      const next = window.prompt('重命名会话', currentTitle)?.trim()
-      if (!next || next === currentTitle) return
-      try {
-        await api.conversations.rename(id, next)
-        await invalidateConversationLists()
-      } catch (error) {
-        toast.error(getErrorMessage(error))
-      }
-    }}
-  />
+  const conversationList = <div className='flex h-full min-h-0 flex-col'>
+    <div className='min-h-0 flex-1 overflow-y-auto p-2'>
+      <ThreadList />
+      {(archivedConversations.data?.length || 0) > 0 && <ArchivedThreads disabled={streaming} />}
+    </div>
+  </div>
 
   return <AssistantRuntimeProvider runtime={runtime}>
     <div className='flex h-full min-h-0 flex-col gap-2'>
@@ -299,10 +303,10 @@ export function ChatPage() {
 
         <div className='flex shrink-0 items-center gap-1'>
           <div className='w-32 sm:w-44 lg:w-52'><Select value={activeKb} onValueChange={setKbId}><SelectTrigger className='h-8'><SelectValue placeholder='选择知识库' /></SelectTrigger><SelectContent>{kbs.data?.map((kb) => <SelectItem value={kb.id} key={kb.id}>{kb.name}</SelectItem>)}</SelectContent></Select></div>
-          <Button size='icon-sm' variant={showSource ? 'secondary' : 'ghost'} className='hidden lg:inline-flex' aria-label={showSource ? '关闭来源证据' : '打开来源证据'} onClick={() => setSourcePanel((current) => !current)}>
+          <Button size='icon-sm' variant={showSource ? 'secondary' : 'ghost'} className='hidden lg:inline-flex' aria-label={showSource ? '关闭来源证据' : '打开来源证据'} onClick={() => { if (!showSource && !selectedSource && latestSources.length) setSelectedSource(latestSources[0]); setSourcePanel((current) => !current) }}>
             {showSource ? <PanelRightClose className='size-4' /> : <PanelRightOpen className='size-4' />}
           </Button>
-          {selectedSource && <Button size='icon-sm' variant='ghost' aria-label='查看来源证据' className='lg:hidden' onClick={() => setMobileSource(true)}><FileText className='size-4' /></Button>}
+          {latestSources.length > 0 && <Button size='icon-sm' variant='ghost' aria-label='查看来源证据' className='lg:hidden' onClick={() => { if (!selectedSource) setSelectedSource(latestSources[0]); setMobileSource(true) }}><FileText className='size-4' /></Button>}
           <Button size='icon-sm' variant={focusMode ? 'secondary' : 'ghost'} aria-label={focusMode ? '退出专注模式' : '进入专注模式'} onClick={() => setFocusMode((current) => !current)}>
             {focusMode ? <Minimize2 className='size-4' /> : <Maximize2 className='size-4' />}
           </Button>
@@ -319,15 +323,15 @@ export function ChatPage() {
         {showConversations && <aside data-testid='conversation-panel' className='hidden border-r bg-muted/12 lg:block'>{conversationList}</aside>}
 
         <section className='flex min-w-0 flex-col overflow-hidden bg-background/45'>
-          <AssistantThread
-            sourcesByMessageId={sourcesByMessageId}
-            isRunning={streaming}
-            progressEvents={progressEvents}
-            traceMessageId={traceMessageId}
-            progressOpen={progressOpen}
-            onToggleProgress={() => setProgressOpen((current) => !current)}
-            onSource={onSource}
+          <RunStatusBar
+            events={progressEvents}
+            running={streaming}
+            open={progressOpen}
+            onToggle={() => setProgressOpen((current) => !current)}
           />
+          <div className='min-h-0 flex-1'>
+            <Thread autoFocus={!selectedArchived} />
+          </div>
         </section>
 
         {showSource && <aside data-testid='source-panel' className='source-panel relative hidden border-l bg-muted/8 lg:flex'>
@@ -336,53 +340,64 @@ export function ChatPage() {
             <div><div className='text-xs font-semibold'>来源证据</div><div className='max-w-64 truncate text-[10px] text-muted-foreground'>{selectedSource ? selectedSource.fileName : '选择一条引用查看证据'}</div></div>
             <Button size='icon-sm' variant='ghost' aria-label='关闭来源证据' onClick={() => setSourcePanel(false)}><X className='size-3.5' /></Button>
           </div>
-          <div className='source-panel-body min-h-0 flex-1 overflow-y-auto overscroll-contain'>{selectedSource ? <SourcePanel source={selectedSource} kbId={activeKb} /> : <SourceEmpty />}</div>
+          <div className='source-panel-body min-h-0 flex-1 overflow-y-auto overscroll-contain'>{selectedSource ? <SourcePanel source={selectedSource} sources={latestSources} onSource={setSelectedSource} kbId={activeKb} /> : <SourceEmpty />}</div>
         </aside>}
       </div>
 
       {mobileConversations && <MobileDrawer title='Conversations' onClose={() => setMobileConversations(false)}>{conversationList}</MobileDrawer>}
-      {mobileSource && selectedSource && <MobileDrawer title='来源证据' side='right' onClose={() => setMobileSource(false)}><SourcePanel source={selectedSource} kbId={activeKb} /></MobileDrawer>}
+      {mobileSource && selectedSource && <MobileDrawer title='来源证据' side='right' onClose={() => setMobileSource(false)}><SourcePanel source={selectedSource} sources={latestSources} onSource={setSelectedSource} kbId={activeKb} /></MobileDrawer>}
     </div>
   </AssistantRuntimeProvider>
 }
 
-function ConversationList({ regular, archived, disabled, onRename }: { regular: Conversation[]; archived: Conversation[]; disabled: boolean; onRename: (id: string, title: string) => void }) {
-  const byId = useMemo(() => new Map([...regular, ...archived].map((item) => [item.id, item])), [archived, regular])
-  return <div className='flex h-full min-h-0 flex-col'>
-    <ThreadListPrimitive.Root className='flex h-full min-h-0 flex-col'>
-      <div className='flex h-12 shrink-0 items-center justify-between border-b px-3'>
-        <div><div className='text-xs font-semibold'>Conversations</div><div className='text-[10px] text-muted-foreground'>{regular.length} active · {archived.length} archived</div></div>
-        <ThreadListPrimitive.New disabled={disabled} aria-label='新建会话' className='inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-50'><MessageSquarePlus className='size-4' /></ThreadListPrimitive.New>
-      </div>
-      <div className='min-h-0 flex-1 overflow-y-auto p-2'>
-        <ThreadListPrimitive.Items>
-          {({ threadListItem }) => <ConversationItem conversation={byId.get(threadListItem.id)} disabled={disabled} onRename={onRename} />}
-        </ThreadListPrimitive.Items>
-        {archived.length > 0 && <div className='px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>Archived</div>}
-        <ThreadListPrimitive.Items archived>
-          {({ threadListItem }) => <ConversationItem conversation={byId.get(threadListItem.id)} archived disabled={disabled} onRename={onRename} />}
-        </ThreadListPrimitive.Items>
-      </div>
+
+function ArchivedThreads({ disabled }: { disabled: boolean }) {
+  return <div className='mt-4 border-t pt-3'>
+    <div className='px-2.5 pb-1 text-xs font-medium text-muted-foreground'>Archived</div>
+    <ThreadListPrimitive.Root className='flex flex-col gap-0.5'>
+      <ThreadListPrimitive.Items archived>
+        {() => <ThreadListItemPrimitive.Root className='group relative flex h-8 items-center rounded-md hover:bg-muted data-active:bg-muted'>
+          <ThreadListItemPrimitive.Trigger disabled={disabled} className='flex h-full min-w-0 flex-1 items-center rounded-md px-2.5 text-start text-sm outline-none disabled:opacity-50'>
+            <span className='min-w-0 flex-1 truncate'><ThreadListItemPrimitive.Title fallback='Archived chat' /></span>
+          </ThreadListItemPrimitive.Trigger>
+          <ThreadListItemPrimitive.Unarchive disabled={disabled} aria-label='恢复会话' className='me-1 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground group-hover:opacity-100 focus:opacity-100 disabled:hidden'>
+            <ArchiveRestore className='size-3.5' />
+          </ThreadListItemPrimitive.Unarchive>
+          <ThreadListItemPrimitive.Delete disabled={disabled} aria-label='删除会话' className='me-1 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100 focus:opacity-100 disabled:hidden'>
+            <Trash2 className='size-3.5' />
+          </ThreadListItemPrimitive.Delete>
+        </ThreadListItemPrimitive.Root>}
+      </ThreadListPrimitive.Items>
     </ThreadListPrimitive.Root>
   </div>
 }
 
-function ConversationItem({ conversation, archived = false, disabled, onRename }: { conversation?: Conversation; archived?: boolean; disabled: boolean; onRename: (id: string, title: string) => void }) {
-  if (!conversation) return null
-  return <ThreadListItemPrimitive.Root className='group mb-1 flex items-center gap-1 rounded-xl px-1.5 py-1.5 transition hover:bg-accent/55 data-active:bg-accent data-active:shadow-sm'>
-    <ThreadListItemPrimitive.Trigger disabled={disabled} className='min-w-0 flex-1 rounded-lg px-1.5 py-1 text-left disabled:cursor-not-allowed disabled:opacity-55'>
-      <div className='truncate text-xs'><ThreadListItemPrimitive.Title fallback='新会话' /></div>
-      <div className='mt-1 text-[10px] text-muted-foreground'>{formatDate(conversation.updatedAt)}</div>
-    </ThreadListItemPrimitive.Trigger>
-    <button type='button' disabled={disabled} aria-label='重命名会话' onClick={() => onRename(conversation.id, conversation.title)} className='rounded-md p-1.5 text-muted-foreground opacity-0 transition hover:bg-background hover:text-foreground group-hover:opacity-100 focus:opacity-100 disabled:hidden'><Pencil className='size-3.5' /></button>
-    {archived
-      ? <ThreadListItemPrimitive.Unarchive disabled={disabled} aria-label='恢复会话' className='rounded-md p-1.5 text-muted-foreground opacity-0 transition hover:bg-background hover:text-foreground group-hover:opacity-100 focus:opacity-100 disabled:hidden'><ArchiveRestore className='size-3.5' /></ThreadListItemPrimitive.Unarchive>
-      : <ThreadListItemPrimitive.Archive disabled={disabled} aria-label='归档会话' className='rounded-md p-1.5 text-muted-foreground opacity-0 transition hover:bg-background hover:text-foreground group-hover:opacity-100 focus:opacity-100 disabled:hidden'><Archive className='size-3.5' /></ThreadListItemPrimitive.Archive>}
-    <ThreadListItemPrimitive.Delete disabled={disabled} aria-label='删除会话' className='rounded-md p-1.5 text-muted-foreground opacity-0 transition hover:bg-destructive/8 hover:text-destructive group-hover:opacity-100 focus:opacity-100 disabled:hidden'><Trash2 className='size-3.5' /></ThreadListItemPrimitive.Delete>
-  </ThreadListItemPrimitive.Root>
+function RunStatusBar({ events, running, open, onToggle }: { events: RagProgressEvent[]; running: boolean; open: boolean; onToggle: () => void }) {
+  if (!events.length) return null
+  const queryCount = events.filter((event) => event.type === 'query.completed').length
+  const retrieval = [...events].reverse().find((event) => event.stage === 'retrieval' && event.status === 'completed')
+  const evidenceCount = typeof retrieval?.data?.evidenceCount === 'number' ? retrieval.data.evidenceCount : typeof retrieval?.data?.mergedEvidenceCount === 'number' ? retrieval.data.mergedEvidenceCount : undefined
+  const review = [...events].reverse().find((event) => event.stage === 'review' && event.type === 'agent.completed')
+  const workflow = [...events].reverse().find((event) => event.stepId === 'workflow')
+  const summary = [queryCount ? `${queryCount} 个查询` : null, evidenceCount != null ? `${evidenceCount} 条证据` : null, review ? `Reviewer ${review.status === 'completed' ? '完成' : review.status}` : null].filter(Boolean).join(' · ')
+  return <div className='shrink-0 border-b bg-background/85 px-3 py-2 backdrop-blur'>
+    <button type='button' onClick={onToggle} className='mx-auto flex w-full max-w-3xl items-center gap-2 rounded-md px-2 py-1 text-left text-xs text-muted-foreground hover:bg-muted/60'>
+      {running ? <LoaderCircle className='size-3.5 animate-spin text-primary' /> : <span className='size-2 rounded-full bg-emerald-500' />}
+      <span className='font-medium text-foreground'>{running ? 'Agent workflow running' : workflow?.status === 'failed' ? 'Agent workflow failed' : 'Agent workflow complete'}</span>
+      <span className='min-w-0 flex-1 truncate'>{summary}</span>
+      <ChevronDown className={cn('size-3.5 transition-transform', open && 'rotate-180')} />
+    </button>
+    {open && <div className='mx-auto mt-1 max-h-40 w-full max-w-3xl overflow-y-auto rounded-md border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground'>
+      {events.map((event, index) => <div key={`${event.stepId}-${event.type}-${index}`} className='flex gap-2 py-0.5'>
+        <span className='w-20 shrink-0 font-medium text-foreground/75'>{event.stage}</span>
+        <span className='min-w-0 flex-1 truncate'>{event.label || event.type}</span>
+        <span className='shrink-0'>{event.status}</span>
+      </div>)}
+    </div>}
+  </div>
 }
 
-function SourcePanel({ source, kbId }: { source: ChatSource; kbId: string }) {
+function SourcePanel({ source, sources, onSource, kbId }: { source: ChatSource; sources: ChatSource[]; onSource: (source: ChatSource) => void; kbId: string }) {
   const open = async () => {
     try {
       const blob = await api.documents.download(kbId, source.documentId)
@@ -401,6 +416,7 @@ function SourcePanel({ source, kbId }: { source: ChatSource; kbId: string }) {
   ] as const
 
   return <div className='space-y-4 p-4'>
+    {sources.length > 1 && <div className='flex flex-wrap gap-1.5'>{sources.map((item, index) => <button key={`${item.documentId}-${item.chunkIndex}-${index}`} type='button' onClick={() => onSource(item)} className={cn('rounded-md border px-2 py-1 text-[11px]', item.documentId === source.documentId && item.chunkIndex === source.chunkIndex ? 'border-primary/40 bg-primary/8 text-primary' : 'bg-background text-muted-foreground hover:bg-muted')}>[{index + 1}] {item.fileName || '来源'}</button>)}</div>}
     <div className='rounded-xl border bg-background/70 p-3.5 shadow-sm'><div className='truncate text-sm font-semibold'>{source.fileName || '未命名文档'}</div><div className='mt-1 text-[11px] text-muted-foreground'>chunk #{source.chunkIndex ?? '—'}{source.pageNumber != null ? ` · page ${source.pageNumber}` : ''}</div></div>
     <div><div className='mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>证据摘录</div><div className='rounded-xl border bg-background/65 p-3.5'><SourceExcerptMarkdown text={source.excerpt || '历史消息未保存 excerpt；重新提问后会显示完整证据摘录。'} /></div></div>
     <div><div className='mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>检索分数</div><div className='grid grid-cols-2 gap-2'>{metrics.map(([label, value]) => <div key={label} className='rounded-xl border bg-background/60 p-3'><div className='text-[9px] uppercase text-muted-foreground'>{label}</div><div className='mt-1 text-sm font-semibold tabular-nums'>{formatScore(value)}</div></div>)}</div></div>

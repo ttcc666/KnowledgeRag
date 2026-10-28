@@ -44,6 +44,7 @@
 
 ### Changed
 
+- Chat 主界面改为 assistant-ui 官方 registry Elements：直接使用官方 `Thread` / `ThreadList` / `MarkdownText` / `Sources`，移除 KnowledgeRag 自建消息气泡、Composer、ActionBar、Welcome、消息 Markdown 覆盖和来源 chips；TanStack Query + SSE 仅作为 External Store 数据适配层，Agent Timeline 与深度 Evidence Panel 移到 Thread 外部，避免继续改写官方消息布局。
 - Chat assistant answer 改用 assistant-ui 官方 `MarkdownTextPrimitive` + GFM 渲染，不再维护手写 Markdown parser；Source Evidence Panel 使用同一标准 Markdown 语义渲染标题、列表、代码块、表格等，同时保持普通链接/远程图片不可交互或加载。
 - RAG Profile 在同一 scoped request 内只解析一次 execution snapshot；Budget Reservation、Agent 执行与 Evaluation 使用一致的模型、Prompt、检索和 Reviewer 配置，避免并发配置修改造成预留与实际执行快照不一致。
 - Multi-query Retrieval 将原始用户查询保持为 mandatory，Planner 生成的扩展查询改为 best-effort；可选扩展查询失败会记录失败但不再拖垮仍有原始检索结果的整轮。
