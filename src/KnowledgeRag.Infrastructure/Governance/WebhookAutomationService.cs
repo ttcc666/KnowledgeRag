@@ -1,4 +1,3 @@
-using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -8,7 +7,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace KnowledgeRag.Infrastructure.Governance;
 
-public sealed class WebhookAutomationService(AppDbContext db, IHttpClientFactory httpClientFactory)
+public sealed class WebhookAutomationService(
+    AppDbContext db,
+    IHttpClientFactory httpClientFactory,
+    WebhookSecretProtector secretProtector)
 {
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
 
@@ -39,7 +41,8 @@ public sealed class WebhookAutomationService(AppDbContext db, IHttpClientFactory
         request.Headers.TryAddWithoutValidation("X-KnowledgeRag-Event", eventType);
         if (!string.IsNullOrWhiteSpace(hook.Secret))
         {
-            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(hook.Secret));
+            var secret = secretProtector.Unprotect(hook.Secret);
+            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
             var signature = Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(json))).ToLowerInvariant();
             request.Headers.TryAddWithoutValidation("X-KnowledgeRag-Signature", "sha256=" + signature);
         }
