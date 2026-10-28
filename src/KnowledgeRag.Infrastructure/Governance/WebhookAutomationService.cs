@@ -72,10 +72,10 @@ public sealed class WebhookAutomationService(
         var secret = string.IsNullOrWhiteSpace(hook.Secret) ? null : secretProtector.Unprotect(hook.Secret);
         var adapter = WebhookChannelAdapterRegistry.Get(hook.Provider);
         using var request = adapter.CreateRequest(uri, delivery, envelopeJson, message, secret);
+        var client = httpClientFactory.CreateClient("governance-webhook");
 
         try
         {
-            var client = httpClientFactory.CreateClient("governance-webhook");
             using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
             var error = response.IsSuccessStatusCode ? null : $"HTTP {(int)response.StatusCode}";
             await RecordDeliveryAsync(hook, (int)response.StatusCode, error, ct);
@@ -85,6 +85,12 @@ public sealed class WebhookAutomationService(
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            var timeout = new WebhookDeliveryTimeoutException(client.Timeout, ex);
+            await RecordDeliveryAsync(hook, (int)HttpStatusCode.RequestTimeout, timeout.Message, CancellationToken.None);
+            throw timeout;
         }
         catch (Exception ex) when (WebhookUrlPolicy.IsBlocked(ex))
         {
