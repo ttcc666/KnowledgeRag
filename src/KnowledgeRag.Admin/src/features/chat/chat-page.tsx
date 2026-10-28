@@ -41,12 +41,12 @@ function escapeMarkdownText(value: string) {
   return value.replace(/([\\`*_{}\[\]<>])/g, '\\$1')
 }
 
-function workflowStatusMark(status?: string) {
-  if (status === 'completed') return '✓'
-  if (status === 'running') return '●'
-  if (status === 'warning') return '⚠'
-  if (status === 'failed') return '×'
-  return '·'
+function workflowStageSummary(status: string | undefined, name: string) {
+  if (status === 'completed') return `${name} ✓`
+  if (status === 'running') return `**${name}中**`
+  if (status === 'warning') return `${name} !`
+  if (status === 'failed') return `${name} ×`
+  return name
 }
 
 function formatWorkflowMarkdown(events: readonly RagProgressEvent[], running: boolean) {
@@ -57,7 +57,7 @@ function formatWorkflowMarkdown(events: readonly RagProgressEvent[], running: bo
   const stageNames: Record<string, string> = { planner: '规划', retrieval: '检索', answer: '回答', review: '审核' }
   const stages = Object.entries(stageNames).map(([stage, name]) => {
     const event = [...events].reverse().find((item) => item.stage === stage)
-    return event ? `${workflowStatusMark(event.status)} ${name}` : null
+    return event ? workflowStageSummary(event.status, name) : null
   }).filter((value): value is string => !!value)
   const queryCount = events.filter((event) => event.type === 'query.completed').length
   const retrieval = [...events].reverse().find((event) => event.stage === 'retrieval' && event.status === 'completed')
@@ -69,8 +69,11 @@ function formatWorkflowMarkdown(events: readonly RagProgressEvent[], running: bo
   const metrics = [queryCount ? `${queryCount} 个查询` : null, evidenceCount != null ? `${evidenceCount} 条证据` : null].filter(Boolean).join(' · ')
   const detail = [stages.join(' · '), metrics].filter(Boolean).join(' · ')
 
-  const summary = [label, detail ? escapeMarkdownText(detail) : ''].filter(Boolean).join(' · ')
-  return `**Agent workflow · ${state}**  \n${summary}`
+  return [
+    `> **Agent workflow** · ${state}  `,
+    `> ${label}${detail ? '  ' : ''}`,
+    detail ? `> ${detail}` : '',
+  ].filter(Boolean).join('\n')
 }
 
 function citationTarget(href: string) {
