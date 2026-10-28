@@ -18,6 +18,8 @@
 
 ### Added
 
+- 新增 **AI Usage Reservation / Ledger**：RAG Run 在 Agent 执行前先按 Planner、Embedding、LLM Reranker、Answer、Reviewer、Specialist 的最坏路径预留预算，执行后再按真实 Workflow 事件数量结算为逐模型 `estimated` usage line items。
+- 新增跨数据库预算策略回归测试，覆盖正在执行的 `reserved` Run 计入每日配额、预留成本计入月预算以及 Workflow 事件驱动的 usage 统计。
 - 新增 Webhook **CAP 异步投递管线**：每个订阅独立发布 delivery message，PostgreSQL 环境复用 CAP 持久化 storage / RabbitMQ 重试，避免外部 HTTP 阻塞 Chat / Evaluation 请求关键路径。
 - 新增 Webhook SSRF 地址策略与回归测试，覆盖 localhost、loopback、RFC1918 私网、link-local、IPv6 unique-local 等受限目标。
 - 新增 RAG **Structured Citation Contract**：Answer Agent 使用 `[E#]` 绑定当前 Evidence，服务端确定性校验并转换为稳定的用户引用编号，只持久化答案实际引用的来源。
@@ -26,6 +28,9 @@
 
 ### Changed
 
+- Budget / Daily Quota 从“执行前读取历史后判断”改为 **Serializable Transaction 预留 → 执行 → 结算**；并发会话会看到彼此的 reservation，降低多个 Run 同时越过剩余配额/预算的竞态风险。
+- RAG Run Trace 增加安全的 `usage.ledger`，保存 operation、model、calls、input/output token estimate、cost 与 `estimated=true`，不保存 prompt、chain-of-thought 或 secret；失败/取消的 Run 同样结算已观察到的调用，过期 reservation 自动释放。
+- Embedding 在没有显式 Model Price 时不再错误套用 Chat token 单价；Chat-based Planner / Answer / Reviewer / Specialist / LLM Reranker 继续使用模型价格或现有 Chat fallback。
 - Webhook delivery 使用稳定 Event ID / `X-KnowledgeRag-Delivery`，仅对 timeout、429 与 5xx 等可恢复失败交给 CAP 重试；自动重定向关闭，避免 redirect 绕过目标地址策略。
 - Reviewer 增加强制引用审核规则：重要知识库事实必须具备有效 `[E#]`，缺失、越界或与 claim 不匹配的引用进入 `CitationErrors` 并使审核失败。
 - Chat Source 不再等同于“本轮所有检索结果”，只暴露最终答案真正引用到的 Evidence；Run Trace 记录 citation validation 统计。
@@ -37,6 +42,7 @@
 
 ### Fixed
 
+- 修复并发 Conversation 仅依赖进程内 conversation lock 时，不同会话可能同时通过同一 Knowledge Base 的预算/每日配额检查并造成超额的问题。
 - 修复 SQLite 下 `RagRuntimeProfileService.EstimateCostAsync` 对 `DateTimeOffset UpdatedAt` 执行数据库端 `ORDER BY` 时抛出 `NotSupportedException`，导致 RAG 回答完成后在持久化 Run Trace / Cost 阶段返回 HTTP 500 的问题。
 - 增加 SQLite 集成回归，直接验证配置模型价格后的成本估算路径可正常执行并使用正确价格。
 
