@@ -1,0 +1,49 @@
+name: Tenant AI Provider PR1 Bootstrap
+
+on:
+  push:
+    branches:
+      - feat/tenant-ai-provider-foundation
+
+permissions:
+  contents: write
+
+jobs:
+  patch-migrate-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Apply runtime patches
+        run: python3 .github/scripts/tenant_ai_provider_pr1.py
+
+      - name: Restore
+        run: dotnet restore KnowledgeRag.NonAzure.sln
+
+      - name: Install dotnet-ef
+        run: dotnet tool install --global dotnet-ef --version 10.0.14
+
+      - name: Generate EF migration
+        run: dotnet ef migrations add TenantAiProviderFoundation --project src/KnowledgeRag.Infrastructure/KnowledgeRag.Infrastructure.csproj --startup-project src/KnowledgeRag.Api/KnowledgeRag.Api.csproj --output-dir Persistence/Migrations
+
+      - name: Build
+        run: dotnet build KnowledgeRag.NonAzure.sln -c Release --no-restore
+
+      - name: Test
+        run: dotnet test KnowledgeRag.NonAzure.sln -c Release --no-build
+
+      - name: Commit generated changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/KnowledgeRag.Infrastructure/Conversations/RagAgentService.cs src/KnowledgeRag.Infrastructure/Search/MultiQuerySearchService.cs src/KnowledgeRag.Infrastructure/Persistence/Migrations
+          git diff --cached --exit-code && exit 0
+          git commit -m "feat(ai): bind tenant providers to rag runtime"
+          git push origin HEAD:feat/tenant-ai-provider-foundation
