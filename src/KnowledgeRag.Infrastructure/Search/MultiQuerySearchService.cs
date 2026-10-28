@@ -36,7 +36,8 @@ public sealed class MultiQuerySearchService(
         int? maxQueries = null,
         int? queryTopK = null,
         int? maxMergedEvidence = null,
-        int? finalTopK = null)
+        int? finalTopK = null,
+        ResolvedAiEndpoint? rerankerEndpoint = null)
     {
         using var activity = Telemetry.ActivitySource.StartActivity("rag.multi_query_search");
         var normalized = NormalizeQueries(originalQuery, queries, maxQueries ?? _options.PlannerMaxQueries);
@@ -61,7 +62,7 @@ public sealed class MultiQuerySearchService(
         activity?.SetTag("rag.merged_candidates", merged.Count);
         if (merged.Count == 0) return [];
 
-        var reranked = await reranker.RerankAsync(originalQuery, merged, outputTopK, cancellationToken);
+        var reranked = await reranker.RerankAsync(originalQuery, merged, outputTopK, cancellationToken, rerankerEndpoint);
         var result = reranked.Select(ToSearchHit).ToList();
         var budgeted = ApplyEvidenceBudget(result);
         activity?.SetTag("rag.result_count", budgeted.Count);
@@ -77,7 +78,8 @@ public sealed class MultiQuerySearchService(
         string originalQuery,
         IReadOnlyList<SearchHit> evidence,
         int topK,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        ResolvedAiEndpoint? rerankerEndpoint = null)
     {
         if (evidence.Count == 0) return [];
         var candidates = evidence
@@ -96,7 +98,7 @@ public sealed class MultiQuerySearchService(
                 x.RerankScore ?? 0,
                 x.PageNumber))
             .ToList();
-        var reranked = await reranker.RerankAsync(originalQuery, candidates, Math.Clamp(topK, 1, 40), cancellationToken);
+        var reranked = await reranker.RerankAsync(originalQuery, candidates, Math.Clamp(topK, 1, 40), cancellationToken, rerankerEndpoint);
         return ApplyEvidenceBudget(reranked.Select(ToSearchHit).ToList());
     }
 
