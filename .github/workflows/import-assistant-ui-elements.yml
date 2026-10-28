@@ -17,6 +17,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: refactor/chat-official-assistant-ui-elements
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -25,8 +26,11 @@ jobs:
       - name: Install official assistant-ui elements from registry
         working-directory: src/KnowledgeRag.Admin
         run: |
-          npx shadcn@latest add https://r.assistant-ui.com/thread.json https://r.assistant-ui.com/thread-list.json --yes
+          npx shadcn@latest add https://r.assistant-ui.com/thread.json https://r.assistant-ui.com/thread-list.json --yes --overwrite
           npm install @assistant-ui/react@latest @assistant-ui/react-markdown@latest --save
+      - name: Preserve existing shared UI primitives outside Chat
+        run: |
+          git checkout origin/main -- src/KnowledgeRag.Admin/src/components/ui/button.tsx || true
       - name: Commit official registry output
         run: |
           git config user.name "github-actions[bot]"
