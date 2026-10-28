@@ -28,8 +28,11 @@ public sealed class AuditLogMiddleware(RequestDelegate next)
             try
             {
                 var actor = HttpActorContext.From(context.User);
-                var tenantId = actor.TenantId ?? TryGuid(context.Request.RouteValues["tenantId"]?.ToString());
-                var knowledgeBaseId = TryGuid(context.Request.RouteValues["knowledgeBaseId"]?.ToString());
+                var tenantId = actor.TenantId
+                               ?? TryGuid(context.Request.RouteValues["tenantId"]?.ToString())
+                               ?? TryGuid(context.Request.Query["tenantId"].FirstOrDefault());
+                var knowledgeBaseId = TryGuid(context.Request.RouteValues["knowledgeBaseId"]?.ToString())
+                                      ?? TryGuid(context.Request.Query["knowledgeBaseId"].FirstOrDefault());
                 if (!tenantId.HasValue && knowledgeBaseId.HasValue)
                     tenantId = await governance.ResolveTenantIdAsync(knowledgeBaseId.Value, CancellationToken.None);
 
