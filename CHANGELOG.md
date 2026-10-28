@@ -35,6 +35,7 @@
 
 ### Changed
 
+- Webhook Automation 的内置通信渠道从统一纯文本升级为 **平台原生富消息**：Slack 使用 Block Kit、Discord 使用 Embed、Microsoft Teams 使用 Adaptive Card、飞书/Lark 使用 Interactive Card、钉钉与企业微信使用原生 Markdown；事件语义与指标保持一致，自定义 HTTP Webhook 继续发送原始 JSON 事件信封与 HMAC-SHA256 签名。
 - Evaluation grounding 从“`response.Sources.Count > 0` 或证据不足”升级为确定性 citation-aware 规则：可回答的知识型 Case 必须具备有效 Evidence Citation；`no-answer` Case 则必须正确 abstain 且不得伪造引用。
 - Evaluation 每次运行固定解析一次 RAG Profile，并只持久化 Planner/Reviewer 开关、检索参数、模型 ID、Agent mode 与 PromptProfileId；不持久化 managed prompt 正文。完成 Run 会与同 Dataset 上一次 completed Run 比较 pass rate、groundedness 与 latency（延迟回归阈值为 +20%）。
 - Evaluation 取消现在持久化为 `cancelled` 而不是与异常统一记为 `failed`；现有 `EvaluationRun` 聚合字段与 API 兼容保留，丰富指标写入 v2 `ResultsJson` 与 `evaluation.completed` webhook 元数据。
@@ -67,6 +68,7 @@
 
 ### Security
 
+- 通信渠道富消息对平台 markup 做安全转义；Discord 显式禁用自动 mentions，避免未知事件字段意外触发 `@everyone` / `@here` 等群体提醒。
 - Evaluation Profile snapshot 明确排除 Planner / Answer / Reviewer managed prompt 正文，只保存非敏感运行配置与标识；评测详情同样不保存 chain-of-thought 或 secret。
 - Webhook 实际连接时重新解析 DNS，只允许公网地址，并阻止本机、私网、link-local、multicast、IPv6 unique-local 与 `.local` 目标；连接层检查降低 DNS rebinding / metadata endpoint SSRF 风险。
 - 非法或不存在的 Evidence 引用不会作为可信 Citation 返回前端；Knowledge Base 内容仍按 untrusted data 处理，管理员 Prompt 不能覆盖强制 grounding / citation 规则。
