@@ -56,6 +56,7 @@
 
 ### Fixed
 
+- 修复启用系统/环境 HTTP(S) 代理（例如 Clash、v2rayN 的本机代理）时，Webhook `ConnectCallback` 收到 `127.0.0.1` 等代理端点并被 SSRF 策略误判的问题；Webhook 专用 HTTP handler 现在不继承 ambient proxy，直接对实际目标域名执行公网 DNS 校验与连接。
 - 修复 Slack、Discord、Microsoft Teams、飞书/Lark、钉钉和企业微信等通信渠道把 Webhook payload 直接 Pretty-print 为 JSON 的问题；`webhook.test`、`rag.run.completed`、`evaluation.completed` 现在输出面向人的摘要、指标、耗时、成本与明确 UTC 时间，未知事件降级为精简键值摘要，自定义 HTTP Webhook 的原始 JSON 契约保持不变。
 - 修复 SQLite BM25 corpus 查询对 `DocumentChunk.CreatedAt`（`DateTimeOffset`）直接执行数据库端 `ORDER BY` 时可能抛出 `NotSupportedException` 的问题；SQLite 路径改用 `julianday(CreatedAt)` 在数据库内完成时间归一化排序并保持 `Bm25MaxCorpusChunks` 上限，同时新增真实 SQLite BM25 回归测试。
 - 修复 Evaluation 将“检索到了任意 Source”视为 grounded，导致答案没有引用 Evidence、甚至引用错误 Evidence ID 时仍可能得到 grounding pass 的问题。
@@ -68,6 +69,7 @@
 
 ### Security
 
+- Webhook SSRF 专用连接客户端显式禁用继承的系统/环境代理，避免代理改变 `ConnectCallback` 的连接端点并混淆实际目标 DNS 校验；localhost、私网、link-local、multicast 等受限地址规则保持严格不变。
 - 通信渠道富消息对平台 markup 做安全转义；Discord 显式禁用自动 mentions，避免未知事件字段意外触发 `@everyone` / `@here` 等群体提醒。
 - Evaluation Profile snapshot 明确排除 Planner / Answer / Reviewer managed prompt 正文，只保存非敏感运行配置与标识；评测详情同样不保存 chain-of-thought 或 secret。
 - Webhook 实际连接时重新解析 DNS，只允许公网地址，并阻止本机、私网、link-local、multicast、IPv6 unique-local 与 `.local` 目标；连接层检查降低 DNS rebinding / metadata endpoint SSRF 风险。
