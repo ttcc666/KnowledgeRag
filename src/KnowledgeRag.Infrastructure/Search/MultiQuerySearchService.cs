@@ -32,21 +32,30 @@ public sealed class MultiQuerySearchService(
         string originalQuery,
         IReadOnlyList<string> queries,
         CancellationToken cancellationToken = default,
-        Func<QuerySearchProgress, CancellationToken, Task>? onQueryProgress = null)
+        Func<QuerySearchProgress, CancellationToken, Task>? onQueryProgress = null,
+        int? maxQueries = null,
+        int? queryTopK = null,
+        int? maxMergedEvidence = null,
+        int? finalTopK = null)
     {
         using var activity = Telemetry.ActivitySource.StartActivity("rag.multi_query_search");
-        var normalized = NormalizeQueries(originalQuery, queries, _options.PlannerMaxQueries);
+        var normalized = NormalizeQueries(originalQuery, queries, maxQueries ?? _options.PlannerMaxQueries);
+        var perQueryTopK = Math.Clamp(queryTopK ?? _options.MultiQueryTopK, 1, 30);
+        var mergedLimit = Math.Clamp(maxMergedEvidence ?? _options.MaxMergedEvidence, 1, 40);
+        var outputTopK = Math.Clamp(finalTopK ?? _options.TopK, 1, 20);
         activity?.SetTag("rag.query_count", normalized.Count);
+        activity?.SetTag("rag.query_top_k", perQueryTopK);
+        activity?.SetTag("rag.max_merged_evidence", mergedLimit);
+        activity?.SetTag("rag.final_top_k", outputTopK);
 
         var tasks = normalized.Select((query, index) =>
-            SearchOneWithProgressAsync(knowledgeBaseId, query, index + 1, normalized.Count, onQueryProgress, cancellationToken)).ToArray();
+            SearchOneWithProgressAsync(knowledgeBaseId, query, index + 1, normalized.Count, perQueryTopK, onQueryProgress, cancellationToken)).ToArray();
         var rankedLists = await Task.WhenAll(tasks);
-        var merged = Merge(rankedLists, Math.Max(_options.MaxMergedEvidence, _options.TopK));
+        var merged = Merge(rankedLists, Math.Max(mergedLimit, outputTopK));
         activity?.SetTag("rag.merged_candidates", merged.Count);
         if (merged.Count == 0) return [];
 
-        var finalTopK = Math.Clamp(_options.TopK, 1, 20);
-        var reranked = await reranker.RerankAsync(originalQuery, merged, finalTopK, cancellationToken);
+        var reranked = await reranker.RerankAsync(originalQuery, merged, outputTopK, cancellationToken);
         var result = reranked.Select(x => new SearchHit(
             x.PointId,
             x.DocumentId,
@@ -88,6 +97,7 @@ public sealed class MultiQuerySearchService(
         string query,
         int index,
         int queryCount,
+        int topK,
         Func<QuerySearchProgress, CancellationToken, Task>? onProgress,
         CancellationToken cancellationToken)
     {
@@ -100,7 +110,7 @@ public sealed class MultiQuerySearchService(
         {
             await using var scope = scopeFactory.CreateAsyncScope();
             var search = scope.ServiceProvider.GetRequiredService<KnowledgeSearchService>();
-            results = await search.SearchAsync(knowledgeBaseId, query, _options.MultiQueryTopK, cancellationToken);
+            results = await search.SearchAsync(knowledgeBaseId, query, topK, cancellationToken);
         }
         catch (Exception) when (onProgress is not null && !cancellationToken.IsCancellationRequested)
         {
