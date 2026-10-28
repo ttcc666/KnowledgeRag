@@ -184,6 +184,7 @@ public sealed class KnowledgeIngestionService(
 
         var newPointIds = new List<Guid>();
         var chunkEntities = new List<DocumentChunkEntity>();
+        var stagedPoints = request.Reindex ? new List<VectorPoint>() : null;
         string? parsePath = null;
         var activated = false;
         try
@@ -236,13 +237,30 @@ public sealed class KnowledgeIngestionService(
                     });
                     points.Add(new VectorPoint(chunkId, document.KnowledgeBaseId, document.Id, document.FileName, chunkIndex, vectors[i]));
                 }
-                foreach (var upsertBatch in points.Chunk(_rag.UpsertBatchSize)) await vectorStore.UpsertAsync(upsertBatch, cancellationToken);
+
+                if (request.Reindex)
+                    stagedPoints!.AddRange(points);
+                else
+                    foreach (var upsertBatch in points.Chunk(_rag.UpsertBatchSize))
+                        await vectorStore.UpsertAsync(upsertBatch, cancellationToken);
+
                 var completed = Math.Min(offset + batch.Count, chunks.Count);
-                var progress = 40 + (int)Math.Round(45d * completed / chunks.Count);
+                var progress = 40 + (int)Math.Round((request.Reindex ? 40d : 45d) * completed / chunks.Count);
                 await NotifySafeAsync(document, request.UserId, progress, request.Reindex ? "reindex_embedding" : "embedding", cancellationToken, chunkEntities.Count);
             }
 
-            await NotifySafeAsync(document, request.UserId, 90, request.Reindex ? "reindex_switching" : "storing", cancellationToken, chunkEntities.Count);
+            if (request.Reindex)
+            {
+                await EnsureActiveAsync(document, true, cancellationToken);
+                await NotifySafeAsync(document, request.UserId, 82, "reindex_staging", cancellationToken, chunkEntities.Count);
+                foreach (var upsertBatch in stagedPoints!.Chunk(_rag.UpsertBatchSize))
+                {
+                    await EnsureActiveAsync(document, true, cancellationToken);
+                    await vectorStore.UpsertAsync(upsertBatch, cancellationToken);
+                }
+            }
+
+            await NotifySafeAsync(document, request.UserId, request.Reindex ? 92 : 90, request.Reindex ? "reindex_switching" : "storing", cancellationToken, chunkEntities.Count);
             var previousPointIds = await ActivateChunkSetAsync(document, chunkEntities, request.Reindex, cancellationToken);
             activated = true;
             await CleanupOldVectorsSafeAsync(previousPointIds, document.Id);
