@@ -255,11 +255,6 @@ export function ChatPage() {
     return <div className='space-y-6'><PageHeader eyebrow='RAG assistant' title='RAG 对话' description='先创建知识库并上传文档，再开始有来源依据的问答。' /><EmptyState icon={<Bot className='size-5 text-primary' />} title='没有可用知识库' description='创建知识库并完成向量化后，就可以开始对话。' /></div>
   }
 
-  const onSource = (source: ChatSource) => {
-    setSelectedSource(source)
-    if (window.innerWidth < 1024) setMobileSource(true)
-    else setSourcePanel(true)
-  }
 
   const showConversations = conversationsOpen && !focusMode
   const showSource = sourcePanel && !focusMode
@@ -395,7 +390,7 @@ function RunStatusBar({ events, running, open, onToggle }: { events: RagProgress
     {open && <div className='mx-auto mt-1 max-h-40 w-full max-w-3xl overflow-y-auto rounded-md border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground'>
       {events.map((event, index) => <div key={`${event.stepId}-${event.type}-${index}`} className='flex gap-2 py-0.5'>
         <span className='w-20 shrink-0 font-medium text-foreground/75'>{event.stage}</span>
-        <span className='min-w-0 flex-1 truncate'>{event.tool || event.type}</span>
+        <span className='min-w-0 flex-1 truncate'>{event.label || event.type}</span>
         <span className='shrink-0'>{event.status}</span>
       </div>)}
     </div>}
