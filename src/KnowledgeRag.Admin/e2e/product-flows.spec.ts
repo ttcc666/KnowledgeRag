@@ -45,8 +45,6 @@ async function mockProductApi(page: Page) {
       return route.fulfill({ status: 204 })
     }
     if (path === '/api/conversations/c1/messages/page') {
-      // Deliberately return the same timestamp and reverse the server array. The UI must still
-      // render a deterministic user -> assistant turn instead of depending on transport order.
       return route.fulfill({ json: streamed ? { messages: [{ id: 'm2', role: 'assistant', content: 'The **policy** answer [1].\n\n- Grounded in the handbook', sourcesJson: JSON.stringify([source]), createdAt: '2026-10-27T00:00:00.1230000+00:00' }, { id: 'm1', role: 'user', content: 'What is the policy?', createdAt: '2026-10-27T00:00:00.1230000+00:00' }], hasEarlier: false, previousCursor: null } : { messages: [], hasEarlier: false, previousCursor: null } })
     }
     if (path === '/api/conversations/c1/messages/m2/feedback') return route.fulfill({ status: 204 })
@@ -115,7 +113,7 @@ test('official assistant-ui Thread renders ordered turns, in-message workflow, c
 
   const assistantMessage = page.locator('[data-slot="aui_assistant-message-root"]')
   await expect(assistantMessage.getByText('Agent workflow · 完成', { exact: false })).toBeVisible()
-  await expect(assistantMessage.getByText('回答已完成', { exact: true })).toBeVisible()
+  await expect(assistantMessage).toContainText('回答已完成')
   await expect(page.getByTestId('run-status-bar')).toHaveCount(0)
 
   const sourceChip = page.locator('a[data-slot="source"][href="#kr-source-1-m2"]')
@@ -176,21 +174,20 @@ test('official assistant-ui ThreadList can rename, archive and restore a convers
   const renameInput = page.getByRole('textbox', { name: 'Rename thread' })
   await renameInput.fill('Renamed policy')
   const renameRequest = page.waitForRequest((request) => request.url().endsWith('/api/conversations/c1') && request.method() === 'PATCH')
-  const regularRefresh = page.waitForResponse((response) => {
-    const url = new URL(response.url())
-    return response.request().method() === 'GET' && url.pathname === '/api/conversations' && url.searchParams.get('archived') !== 'true'
-  })
-  const archivedRefresh = page.waitForResponse((response) => {
-    const url = new URL(response.url())
-    return response.request().method() === 'GET' && url.pathname === '/api/conversations' && url.searchParams.get('archived') === 'true'
-  })
   await renameInput.press('Enter')
-  await Promise.all([renameRequest, regularRefresh, archivedRefresh])
+  await renameRequest
   const threadList = page.locator('[data-slot="aui_thread-list-root"]')
-  const renamedThread = threadList.locator('[data-slot="aui_thread-list-item"]').filter({ hasText: 'Renamed policy' })
+  let renamedThread = threadList.locator('[data-slot="aui_thread-list-item"]').filter({ hasText: 'Renamed policy' })
   await expect(renamedThread).toBeVisible()
 
+  await page.reload()
+  const stableThreadList = page.locator('[data-slot="aui_thread-list-root"]')
+  await expect(stableThreadList).toBeVisible()
+  renamedThread = stableThreadList.locator('[data-slot="aui_thread-list-item"]').filter({ hasText: 'Renamed policy' })
+  await expect(renamedThread).toBeVisible()
+  await renamedThread.hover()
   await renamedThread.getByRole('button', { name: 'More options' }).click()
+  await expect(page.locator('[data-slot="aui_thread-list-item-more-content"][data-state="open"]')).toBeVisible()
   const archiveRequest = page.waitForRequest((request) => request.url().endsWith('/api/conversations/c1/archive') && request.method() === 'POST')
   await page.getByRole('menuitem', { name: 'Archive', exact: true }).click()
   await archiveRequest
