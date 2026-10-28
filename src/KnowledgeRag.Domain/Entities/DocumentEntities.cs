@@ -20,11 +20,6 @@ public sealed class DocumentEntity
     public string Sha256 { get; set; } = string.Empty;
     public long SizeBytes { get; set; }
     public int ChunkCount { get; set; }
-    /// <summary>
-    /// Monotonically increasing active index generation. Zero means the document has never
-    /// completed indexing. Re-indexing builds the next generation before atomically swapping it in.
-    /// </summary>
-    public int IndexVersion { get; set; }
     public DocumentStatus Status { get; set; }
     public string? LastError { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
