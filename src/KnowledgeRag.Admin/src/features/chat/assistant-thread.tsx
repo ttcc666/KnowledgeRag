@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react'
+import { useMemo } from 'react'
 import {
   ActionBarPrimitive,
   AuiIf,
@@ -8,6 +8,8 @@ import {
   ThreadPrimitive,
   useAui,
 } from '@assistant-ui/react'
+import { MarkdownTextPrimitive } from '@assistant-ui/react-markdown'
+import remarkGfm from 'remark-gfm'
 import {
   AlertCircle,
   ArrowUp,
@@ -25,6 +27,7 @@ import {
   ThumbsUp,
   Wrench,
 } from 'lucide-react'
+import { citationNumberFromHref, createTrustedCitationRemarkPlugin } from './chat-markdown'
 import { cn } from '@/lib/utils'
 import type { ChatSource, RagProgressEvent } from '@/lib/types'
 
@@ -185,7 +188,7 @@ function AssistantMessage({
         <div className='w-full text-sm leading-7 sm:text-[14px]'>
           <MessagePrimitive.Parts>
             {({ part }) => part.type === 'text'
-              ? <div className='break-words'><GroundedText text={part.text} sources={sources} onSource={onSource} /><MessagePartPrimitive.InProgress><span className='ml-1 inline-block h-4 w-0.5 animate-pulse bg-primary align-middle' /></MessagePartPrimitive.InProgress></div>
+              ? <div className='break-words'><AssistantMarkdownPart sources={sources} onSource={onSource} /><MessagePartPrimitive.InProgress><span className='ml-1 inline-block h-4 w-0.5 animate-pulse bg-primary align-middle' /></MessagePartPrimitive.InProgress></div>
               : part.type === 'tool-call' ? part.toolUI : null}
           </MessagePrimitive.Parts>
         </div>
@@ -232,120 +235,42 @@ function AssistantMessage({
   )
 }
 
-export function GroundedText({ text, sources, onSource }: { text: string; sources: ChatSource[]; onSource: (source: ChatSource) => void }) {
-  const segments = useMemo(() => text.split('```'), [text])
-  return <div className='space-y-3'>
-    {segments.map((segment, segmentIndex) => {
-      if (segmentIndex % 2 === 1) {
-        const lines = segment.replace(/^\n/, '').split('\n')
-        const maybeLanguage = lines[0]?.trim() || ''
-        const hasLanguage = /^[a-z0-9+#._-]{1,24}$/i.test(maybeLanguage) && lines.length > 1
-        const code = (hasLanguage ? lines.slice(1) : lines).join('\n').trimEnd()
-        return <pre key={segmentIndex} className='overflow-x-auto rounded-xl border bg-muted/55 p-3 text-xs leading-5'><code>{code}</code></pre>
-      }
-      return <div key={segmentIndex} className='space-y-2.5'>{renderMarkdownBlocks(segment, sources, onSource, segmentIndex)}</div>
-    })}
-  </div>
-}
+function AssistantMarkdownPart({ sources, onSource }: { sources: ChatSource[]; onSource: (source: ChatSource) => void }) {
+  const citationPlugin = useMemo(() => createTrustedCitationRemarkPlugin(sources.length), [sources.length])
 
-function renderMarkdownBlocks(text: string, sources: ChatSource[], onSource: (source: ChatSource) => void, keyPrefix: number) {
-  const lines = text.split('\n')
-  const blocks: ReactNode[] = []
-  let index = 0
-
-  while (index < lines.length) {
-    const line = lines[index]
-    const trimmed = line.trim()
-    if (!trimmed) {
-      index += 1
-      continue
-    }
-
-    const heading = line.match(/^\s{0,3}(#{1,3})\s+(.+)$/)
-    if (heading) {
-      const content = renderInline(heading[2], sources, onSource, `${keyPrefix}-${index}-heading`)
-      if (heading[1].length === 1) blocks.push(<h2 key={`${keyPrefix}-${index}`} className='pt-1 text-lg font-semibold tracking-tight'>{content}</h2>)
-      else if (heading[1].length === 2) blocks.push(<h3 key={`${keyPrefix}-${index}`} className='pt-1 text-base font-semibold tracking-tight'>{content}</h3>)
-      else blocks.push(<h4 key={`${keyPrefix}-${index}`} className='pt-0.5 text-sm font-semibold'>{content}</h4>)
-      index += 1
-      continue
-    }
-
-    const unordered = line.match(/^\s*[-*]\s+(.+)$/)
-    if (unordered) {
-      const items: { key: string; content: string }[] = []
-      while (index < lines.length) {
-        const match = lines[index].match(/^\s*[-*]\s+(.+)$/)
-        if (!match) break
-        items.push({ key: `${keyPrefix}-${index}`, content: match[1] })
-        index += 1
-      }
-      blocks.push(
-        <ul key={`${keyPrefix}-${items[0].key}-ul`} className='list-disc space-y-1.5 pl-5 marker:text-muted-foreground'>
-          {items.map((item) => <li key={item.key} className='pl-1'>{renderInline(item.content, sources, onSource, `${item.key}-inline`)}</li>)}
-        </ul>,
-      )
-      continue
-    }
-
-    const ordered = line.match(/^\s*(\d+)\.\s+(.+)$/)
-    if (ordered) {
-      const start = Number(ordered[1])
-      const items: { key: string; content: string }[] = []
-      while (index < lines.length) {
-        const match = lines[index].match(/^\s*(\d+)\.\s+(.+)$/)
-        if (!match) break
-        items.push({ key: `${keyPrefix}-${index}`, content: match[2] })
-        index += 1
-      }
-      blocks.push(
-        <ol key={`${keyPrefix}-${items[0].key}-ol`} start={start} className='list-decimal space-y-1.5 pl-6 marker:font-medium marker:text-muted-foreground'>
-          {items.map((item) => <li key={item.key} className='pl-1'>{renderInline(item.content, sources, onSource, `${item.key}-inline`)}</li>)}
-        </ol>,
-      )
-      continue
-    }
-
-    const quote = line.match(/^\s*>\s?(.*)$/)
-    if (quote) {
-      blocks.push(
-        <blockquote key={`${keyPrefix}-${index}`} className='border-l-2 border-primary/20 pl-3 text-foreground/80'>
-          {renderInline(quote[1], sources, onSource, `${keyPrefix}-${index}-quote`)}
-        </blockquote>,
-      )
-      index += 1
-      continue
-    }
-
-    blocks.push(<p key={`${keyPrefix}-${index}`}>{renderInline(trimmed, sources, onSource, `${keyPrefix}-${index}-paragraph`)}</p>)
-    index += 1
-  }
-
-  return blocks
-}
-
-function renderInline(text: string, sources: ChatSource[], onSource: (source: ChatSource) => void, keyPrefix = 'inline'): ReactNode[] {
-  const nodes: ReactNode[] = []
-  const token = /(\[(\d{1,3})\]|\*\*([^*]+)\*\*|`([^`\n]+)`)/g
-  let cursor = 0
-  let match: RegExpExecArray | null
-  while ((match = token.exec(text)) !== null) {
-    if (match.index > cursor) nodes.push(text.slice(cursor, match.index))
-    if (match[2]) {
-      const citation = Number(match[2])
-      const source = citation >= 1 && citation <= sources.length ? sources[citation - 1] : undefined
-      nodes.push(source
-        ? <button key={`${keyPrefix}-citation-${match.index}`} type='button' onClick={() => onSource(source)} className='mx-0.5 inline-flex rounded-md border border-primary/20 bg-primary/5 px-1.5 py-0.5 align-baseline text-[11px] font-semibold leading-none text-primary hover:bg-primary/10' aria-label={`查看引用 ${citation}: ${source.fileName || '未命名文档'}`}>[{citation}]</button>
-        : match[0])
-    } else if (match[3]) {
-      nodes.push(<strong key={`${keyPrefix}-strong-${match.index}`} className='font-semibold'>{renderInline(match[3], sources, onSource, `${keyPrefix}-strong-${match.index}`)}</strong>)
-    } else if (match[4]) {
-      nodes.push(<code key={`${keyPrefix}-code-${match.index}`} className='rounded-md border bg-muted/60 px-1.5 py-0.5 font-mono text-[0.9em] text-foreground'>{match[4]}</code>)
-    }
-    cursor = match.index + match[0].length
-  }
-  if (cursor < text.length) nodes.push(text.slice(cursor))
-  return nodes
+  return (
+    <MarkdownTextPrimitive
+      remarkPlugins={[remarkGfm, citationPlugin]}
+      className='space-y-3'
+      components={{
+        h1: ({ children }) => <h2 className='mt-4 text-lg font-semibold tracking-tight first:mt-0'>{children}</h2>,
+        h2: ({ children }) => <h3 className='mt-4 text-base font-semibold tracking-tight first:mt-0'>{children}</h3>,
+        h3: ({ children }) => <h4 className='mt-3 text-sm font-semibold first:mt-0'>{children}</h4>,
+        h4: ({ children }) => <h4 className='mt-3 text-sm font-semibold first:mt-0'>{children}</h4>,
+        p: ({ children }) => <p className='my-2 first:mt-0 last:mb-0'>{children}</p>,
+        ul: ({ children }) => <ul className='my-2 list-disc space-y-1.5 pl-5 marker:text-muted-foreground'>{children}</ul>,
+        ol: ({ children, start }) => <ol start={start} className='my-2 list-decimal space-y-1.5 pl-6 marker:font-medium marker:text-muted-foreground'>{children}</ol>,
+        li: ({ children }) => <li className='pl-1'>{children}</li>,
+        blockquote: ({ children }) => <blockquote className='my-2 border-l-2 border-primary/25 pl-3 text-foreground/80'>{children}</blockquote>,
+        pre: ({ children }) => <pre className='my-3 overflow-x-auto rounded-xl border bg-muted/55 p-3 text-xs leading-5'>{children}</pre>,
+        code: ({ children, className }) => className
+          ? <code className={className}>{children}</code>
+          : <code className='rounded-md border bg-muted/60 px-1.5 py-0.5 font-mono text-[0.9em] text-foreground'>{children}</code>,
+        table: ({ children }) => <div className='my-3 overflow-x-auto rounded-xl border'><table className='w-full border-collapse text-left text-xs'>{children}</table></div>,
+        thead: ({ children }) => <thead className='border-b bg-muted/45'>{children}</thead>,
+        th: ({ children }) => <th className='border-r px-3 py-2 font-semibold last:border-r-0'>{children}</th>,
+        td: ({ children }) => <td className='border-r border-t px-3 py-2 align-top last:border-r-0'>{children}</td>,
+        a: ({ href, children }) => {
+          const citation = citationNumberFromHref(href)
+          const source = citation != null && citation <= sources.length ? sources[citation - 1] : undefined
+          return source
+            ? <button type='button' onClick={() => onSource(source)} className='mx-0.5 inline-flex rounded-md border border-primary/20 bg-primary/5 px-1.5 py-0.5 align-baseline text-[11px] font-semibold leading-none text-primary hover:bg-primary/10' aria-label={`查看引用 ${citation}: ${source.fileName || '未命名文档'}`}>{children}</button>
+            : <span className='underline decoration-dotted underline-offset-2'>{children}</span>
+        },
+        img: ({ alt }) => <span className='text-muted-foreground'>[图片{alt ? `: ${alt}` : ''}]</span>,
+      }}
+    />
+  )
 }
 
 function ExecutionTimeline({ events, open, onToggle, running }: { events: RagProgressEvent[]; open: boolean; onToggle: () => void; running: boolean }) {

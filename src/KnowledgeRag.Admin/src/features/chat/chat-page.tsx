@@ -10,6 +10,7 @@ import { Archive, ArchiveRestore, Bot, FileText, Maximize2, Menu, MessageSquareP
 import { motion } from 'motion/react'
 import { toast } from 'sonner'
 import { AssistantThread } from './assistant-thread'
+import { SourceExcerptMarkdown } from './chat-markdown'
 import { flattenMessagePages, resolveRuntimeThreadId } from './chat-runtime-state'
 import { mergeProgressEvent } from './progress-events'
 import { api, getErrorMessage } from '@/lib/api'
@@ -401,7 +402,7 @@ function SourcePanel({ source, kbId }: { source: ChatSource; kbId: string }) {
 
   return <div className='space-y-4 p-4'>
     <div className='rounded-xl border bg-background/70 p-3.5 shadow-sm'><div className='truncate text-sm font-semibold'>{source.fileName || '未命名文档'}</div><div className='mt-1 text-[11px] text-muted-foreground'>chunk #{source.chunkIndex ?? '—'}{source.pageNumber != null ? ` · page ${source.pageNumber}` : ''}</div></div>
-    <div><div className='mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>证据摘录</div><div className='whitespace-pre-wrap rounded-xl border bg-background/65 p-3.5 text-xs leading-6 text-foreground/85'>{source.excerpt || '历史消息未保存 excerpt；重新提问后会显示完整证据摘录。'}</div></div>
+    <div><div className='mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>证据摘录</div><div className='rounded-xl border bg-background/65 p-3.5'><SourceExcerptMarkdown text={source.excerpt || '历史消息未保存 excerpt；重新提问后会显示完整证据摘录。'} /></div></div>
     <div><div className='mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>检索分数</div><div className='grid grid-cols-2 gap-2'>{metrics.map(([label, value]) => <div key={label} className='rounded-xl border bg-background/60 p-3'><div className='text-[9px] uppercase text-muted-foreground'>{label}</div><div className='mt-1 text-sm font-semibold tabular-nums'>{formatScore(value)}</div></div>)}</div></div>
     <div className='rounded-xl border border-primary/15 bg-primary/5 p-3.5'><div className='text-[10px] uppercase tracking-wide text-muted-foreground'>Final score</div><div className='mt-1 text-xl font-semibold tabular-nums'>{formatScore(source.score)}</div></div>
     <Button variant='outline' className='w-full' onClick={() => void open()}>打开原始文档</Button>
