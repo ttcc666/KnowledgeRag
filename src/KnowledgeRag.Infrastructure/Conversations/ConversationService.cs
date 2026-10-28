@@ -152,7 +152,10 @@ public sealed class ConversationService(
         var rows = await db.ChatMessages.AsNoTracking()
             .Where(x => x.ConversationId == conversationId && x.Role != MetadataRole)
             .ToListAsync(cancellationToken);
-        return rows.OrderBy(x => x.CreatedAt).ToList();
+        return rows.OrderBy(x => x.CreatedAt)
+            .ThenByDescending(x => x.Role)
+            .ThenBy(x => x.Id)
+            .ToList();
     }
 
     public async Task<ChatMessagePage> GetMessagePageAsync(
@@ -172,21 +175,22 @@ public sealed class ConversationService(
         {
             // SQLite EF Core cannot translate DateTimeOffset ordering/comparison. Keep this page
             // bounded in SQL and normalize the stored UTC timestamp with julianday instead of
-            // materializing an unbounded conversation into memory.
+            // materializing an unbounded conversation into memory. Role and Id are deterministic
+            // tie-breakers for legacy rows whose timestamps collapse to the same SQLite precision.
             rows = before.HasValue
                 ? await db.ChatMessages.FromSqlInterpolated($$"""
                     SELECT * FROM "ChatMessages"
                     WHERE "ConversationId" = {{conversationId}}
                       AND "Role" <> {{MetadataRole}}
                       AND julianday("CreatedAt") < julianday({{before.Value}})
-                    ORDER BY julianday("CreatedAt") DESC
+                    ORDER BY julianday("CreatedAt") DESC, "Role" ASC, "Id" DESC
                     LIMIT {{take}}
                     """).AsNoTracking().ToListAsync(cancellationToken)
                 : await db.ChatMessages.FromSqlInterpolated($$"""
                     SELECT * FROM "ChatMessages"
                     WHERE "ConversationId" = {{conversationId}}
                       AND "Role" <> {{MetadataRole}}
-                    ORDER BY julianday("CreatedAt") DESC
+                    ORDER BY julianday("CreatedAt") DESC, "Role" ASC, "Id" DESC
                     LIMIT {{take}}
                     """).AsNoTracking().ToListAsync(cancellationToken);
         }
@@ -195,7 +199,12 @@ public sealed class ConversationService(
             var query = db.ChatMessages.AsNoTracking()
                 .Where(x => x.ConversationId == conversationId && x.Role != MetadataRole);
             if (before.HasValue) query = query.Where(x => x.CreatedAt < before.Value);
-            rows = await query.OrderByDescending(x => x.CreatedAt).Take(take).ToListAsync(cancellationToken);
+            rows = await query
+                .OrderByDescending(x => x.CreatedAt)
+                .ThenBy(x => x.Role)
+                .ThenByDescending(x => x.Id)
+                .Take(take)
+                .ToListAsync(cancellationToken);
         }
 
         var hasEarlier = rows.Count > limit;
@@ -370,7 +379,9 @@ public sealed class ConversationService(
             var sources = final.Sources.Select(ToSource).ToList();
             db.ChatMessages.AddRange(
                 new ChatMessageEntity { Id = Guid.NewGuid(), ConversationId = conversation.Id, Role = "user", Content = message, CreatedAt = now },
-                new ChatMessageEntity { Id = Guid.NewGuid(), ConversationId = conversation.Id, Role = "assistant", Content = final.Answer, SourcesJson = JsonSerializer.Serialize(sources, WebJson), CreatedAt = now.AddTicks(1) });
+                // Keep the turn distinct at SQLite/JavaScript millisecond precision. Older rows are
+                // still protected by deterministic Role/Id tie-breakers in the read path.
+                new ChatMessageEntity { Id = Guid.NewGuid(), ConversationId = conversation.Id, Role = "assistant", Content = final.Answer, SourcesJson = JsonSerializer.Serialize(sources, WebJson), CreatedAt = now.AddMilliseconds(1) });
             await db.SaveChangesAsync(cancellationToken);
 
             timer.Stop();
