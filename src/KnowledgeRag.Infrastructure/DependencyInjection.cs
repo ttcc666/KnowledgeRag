@@ -41,7 +41,14 @@ public static class DependencyInjection
         services.AddScoped<GovernanceService>();
         services.AddScoped<EvaluationService>();
         services.AddScoped<WebhookAutomationService>();
-        services.AddHttpClient("governance-webhook", client => client.Timeout = TimeSpan.FromSeconds(8));
+        services.AddTransient<WebhookDeliverySubscriber>();
+        services.AddHttpClient("governance-webhook", client => client.Timeout = TimeSpan.FromSeconds(8))
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                AllowAutoRedirect = false,
+                ConnectCallback = WebhookSafeConnection.ConnectAsync,
+                PooledConnectionLifetime = TimeSpan.FromMinutes(2)
+            });
         return services;
     }
 
