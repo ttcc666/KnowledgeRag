@@ -44,6 +44,7 @@
 
 ### Changed
 
+- Chat assistant answer 改用 assistant-ui 官方 `MarkdownTextPrimitive` + GFM 渲染，不再维护手写 Markdown parser；Source Evidence Panel 使用同一标准 Markdown 语义渲染标题、列表、代码块、表格等，同时保持普通链接/远程图片不可交互或加载。
 - RAG Profile 在同一 scoped request 内只解析一次 execution snapshot；Budget Reservation、Agent 执行与 Evaluation 使用一致的模型、Prompt、检索和 Reviewer 配置，避免并发配置修改造成预留与实际执行快照不一致。
 - Multi-query Retrieval 将原始用户查询保持为 mandatory，Planner 生成的扩展查询改为 best-effort；可选扩展查询失败会记录失败但不再拖垮仍有原始检索结果的整轮。
 - Reviewer Repair 的跨轮 Evidence merge 不再直接比较 round-local reranker score，改为合并后按 fusion evidence 归一化排序并确定性去重。
@@ -73,6 +74,7 @@
 
 ### Fixed
 
+- Webhook 原生 HTTP 投递超过配置的 8 秒超时时，不再以未分类 `TaskCanceledException` 记录；现在保存明确的 Request Timeout 状态并抛出可重试 `WebhookDeliveryTimeoutException` 供 CAP 重试，手动 Webhook Test API 返回 504。
 - 修复 Chat 受限 Markdown renderer 对缩进列表、连续有序列表和 inline code 处理不完整，导致回答中出现原始 `-` / 反引号、段落空隙过大且执行过程卡片与正文阅读宽度不一致的问题；现在正文、引用、执行过程和反馈栏统一在同一阅读宽度内，同时继续禁止 raw HTML / 任意链接并保留可信 Citation 边界。
 - 修复 assistant-ui Thread List / 分页切换的瞬态状态可能让 Chat runtime 收到尚未出现在 regular/archived 列表中的 `threadId` 或异常消息项，进而在构建 Source 索引时访问 `undefined.id` 并使页面崩溃的问题；Chat 现在只暴露已注册 thread，并在分页消息边界过滤空值与畸形项。
 - 修复 React StrictMode 下 Document Processing SignalR effect cleanup 可能在初始 negotiation 尚未完成时调用 `stop()` 并产生 `The connection was stopped during negotiation` 的问题；cleanup 现在等待 `start()` settle 后再停止该 effect 实例的连接。
