@@ -47,6 +47,37 @@
     min-width: 0;
     flex-direction: column;
   }
+
+  .chat-workspace [data-slot='aui_assistant-message-indicator'] {
+    display: inline-flex;
+    min-height: 1.25rem;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--muted-foreground);
+    font-size: 0;
+    vertical-align: middle;
+  }
+
+  .chat-workspace [data-slot='aui_assistant-message-indicator']::before {
+    width: 0.7rem;
+    height: 0.7rem;
+    flex: none;
+    border: 1.5px solid color-mix(in oklab, var(--muted-foreground) 28%, transparent);
+    border-top-color: var(--primary);
+    border-radius: 9999px;
+    content: '';
+    animation: kr-chat-spin 0.8s linear infinite;
+  }
+
+  .chat-workspace [data-slot='aui_assistant-message-indicator']::after {
+    content: '正在处理';
+    font-size: 0.7rem;
+    line-height: 1rem;
+  }
+}
+
+@keyframes kr-chat-spin {
+  to { transform: rotate(360deg); }
 }
 
 @media (min-width: 1024px) {
@@ -89,7 +120,6 @@
     height:
       var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto));
     }
-  }
   @keyframes collapsible-up {
   from {
     height:
