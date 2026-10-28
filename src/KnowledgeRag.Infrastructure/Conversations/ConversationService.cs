@@ -43,24 +43,106 @@ public sealed class ConversationService(
         bool archived = false,
         CancellationToken cancellationToken = default)
     {
-        var query = db.Conversations.AsNoTracking().Where(x => x.UserId == actor.UserId);
-        query = actor.IsApiKey ? query.Where(x => x.ApiKeyId == actor.ApiKeyId) : query.Where(x => x.ApiKeyId == null);
         if (knowledgeBaseId.HasValue)
-        {
             await access.RequireAsync(actor, knowledgeBaseId.Value, KnowledgeBaseRole.Viewer, cancellationToken);
-            query = query.Where(x => x.KnowledgeBaseId == knowledgeBaseId.Value);
+
+        if (db.Database.IsSqlite())
+        {
+            // EF Core SQLite cannot translate DateTimeOffset ORDER BY. Keep the entire filter,
+            // archive predicate, ordering and 200-row cap in SQL so a large conversation table is
+            // never materialized just to regain provider parity.
+            var archiveFlag = archived ? 1 : 0;
+            if (actor.IsApiKey)
+            {
+                var apiKeyId = actor.ApiKeyId!.Value;
+                return knowledgeBaseId.HasValue
+                    ? await db.Conversations.FromSqlInterpolated($$"""
+                        SELECT c.* FROM "Conversations" c
+                        WHERE c."UserId" = {{actor.UserId}}
+                          AND c."ApiKeyId" = {{apiKeyId}}
+                          AND c."KnowledgeBaseId" = {{knowledgeBaseId.Value}}
+                          AND (
+                            ({{archiveFlag}} = 1 AND EXISTS (
+                              SELECT 1 FROM "ChatMessages" m
+                              WHERE m."ConversationId" = c."Id" AND m."Role" = {{MetadataRole}} AND m."Content" = {{ArchiveMarker}}
+                            ))
+                            OR
+                            ({{archiveFlag}} = 0 AND NOT EXISTS (
+                              SELECT 1 FROM "ChatMessages" m
+                              WHERE m."ConversationId" = c."Id" AND m."Role" = {{MetadataRole}} AND m."Content" = {{ArchiveMarker}}
+                            ))
+                          )
+                        ORDER BY julianday(c."UpdatedAt") DESC
+                        LIMIT 200
+                        """).AsNoTracking().ToListAsync(cancellationToken)
+                    : await db.Conversations.FromSqlInterpolated($$"""
+                        SELECT c.* FROM "Conversations" c
+                        WHERE c."UserId" = {{actor.UserId}}
+                          AND c."ApiKeyId" = {{apiKeyId}}
+                          AND (
+                            ({{archiveFlag}} = 1 AND EXISTS (
+                              SELECT 1 FROM "ChatMessages" m
+                              WHERE m."ConversationId" = c."Id" AND m."Role" = {{MetadataRole}} AND m."Content" = {{ArchiveMarker}}
+                            ))
+                            OR
+                            ({{archiveFlag}} = 0 AND NOT EXISTS (
+                              SELECT 1 FROM "ChatMessages" m
+                              WHERE m."ConversationId" = c."Id" AND m."Role" = {{MetadataRole}} AND m."Content" = {{ArchiveMarker}}
+                            ))
+                          )
+                        ORDER BY julianday(c."UpdatedAt") DESC
+                        LIMIT 200
+                        """).AsNoTracking().ToListAsync(cancellationToken);
+            }
+
+            return knowledgeBaseId.HasValue
+                ? await db.Conversations.FromSqlInterpolated($$"""
+                    SELECT c.* FROM "Conversations" c
+                    WHERE c."UserId" = {{actor.UserId}}
+                      AND c."ApiKeyId" IS NULL
+                      AND c."KnowledgeBaseId" = {{knowledgeBaseId.Value}}
+                      AND (
+                        ({{archiveFlag}} = 1 AND EXISTS (
+                          SELECT 1 FROM "ChatMessages" m
+                          WHERE m."ConversationId" = c."Id" AND m."Role" = {{MetadataRole}} AND m."Content" = {{ArchiveMarker}}
+                        ))
+                        OR
+                        ({{archiveFlag}} = 0 AND NOT EXISTS (
+                          SELECT 1 FROM "ChatMessages" m
+                          WHERE m."ConversationId" = c."Id" AND m."Role" = {{MetadataRole}} AND m."Content" = {{ArchiveMarker}}
+                        ))
+                      )
+                    ORDER BY julianday(c."UpdatedAt") DESC
+                    LIMIT 200
+                    """).AsNoTracking().ToListAsync(cancellationToken)
+                : await db.Conversations.FromSqlInterpolated($$"""
+                    SELECT c.* FROM "Conversations" c
+                    WHERE c."UserId" = {{actor.UserId}}
+                      AND c."ApiKeyId" IS NULL
+                      AND (
+                        ({{archiveFlag}} = 1 AND EXISTS (
+                          SELECT 1 FROM "ChatMessages" m
+                          WHERE m."ConversationId" = c."Id" AND m."Role" = {{MetadataRole}} AND m."Content" = {{ArchiveMarker}}
+                        ))
+                        OR
+                        ({{archiveFlag}} = 0 AND NOT EXISTS (
+                          SELECT 1 FROM "ChatMessages" m
+                          WHERE m."ConversationId" = c."Id" AND m."Role" = {{MetadataRole}} AND m."Content" = {{ArchiveMarker}}
+                        ))
+                      )
+                    ORDER BY julianday(c."UpdatedAt") DESC
+                    LIMIT 200
+                    """).AsNoTracking().ToListAsync(cancellationToken);
         }
 
+        var query = db.Conversations.AsNoTracking().Where(x => x.UserId == actor.UserId);
+        query = actor.IsApiKey ? query.Where(x => x.ApiKeyId == actor.ApiKeyId) : query.Where(x => x.ApiKeyId == null);
+        if (knowledgeBaseId.HasValue) query = query.Where(x => x.KnowledgeBaseId == knowledgeBaseId.Value);
         var archivedIds = db.ChatMessages.AsNoTracking()
             .Where(x => x.Role == MetadataRole && x.Content == ArchiveMarker)
             .Select(x => x.ConversationId);
         query = archived ? query.Where(x => archivedIds.Contains(x.Id)) : query.Where(x => !archivedIds.Contains(x.Id));
-
-        // SQLite cannot reliably ORDER BY DateTimeOffset server-side. The per-user conversation
-        // list is explicitly bounded to 200, so keep provider-neutral filtering in SQL and sort
-        // only this bounded list in memory.
-        var rows = await query.Take(200).ToListAsync(cancellationToken);
-        return rows.OrderByDescending(x => x.UpdatedAt).ToList();
+        return await query.OrderByDescending(x => x.UpdatedAt).Take(200).ToListAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyList<ChatMessageEntity>> GetMessagesAsync(ActorContext actor, Guid conversationId, CancellationToken cancellationToken = default)
