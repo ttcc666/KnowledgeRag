@@ -1,6 +1,12 @@
 import axios, { AxiosError, type AxiosRequestConfig } from 'axios'
 import { useAuthStore } from '@/stores/auth-store'
-import type { ApiKeySummary, AuthResponse, ChatMessage, ChatResponse, Conversation, CreatedApiKey, DashboardSummary, IngestionJobSummary, KnowledgeBaseMember, KnowledgeBaseSummary, KnowledgeDocument, ProductSettingsSummary, RagProgressEvent, SearchHit, TenantMember, TenantSummary, UploadResponse, UserSummary } from './types'
+import type {
+  ApiKeySummary, AuditLog, AuthResponse, ChatMessage, ChatResponse, Conversation, CreatedApiKey,
+  DashboardSummary, EvaluationCase, EvaluationDataset, EvaluationRun, GovernanceOverview, IngestionJobSummary,
+  KnowledgeBaseMember, KnowledgeBaseSummary, KnowledgeDocument, ModelPrice, ProductSettingsSummary, PromptProfile,
+  RagProfile, RagProfileUpdate, RagProgressEvent, RagRun, SearchHit, TenantMember, TenantSummary, UploadResponse,
+  UserSummary, WebhookSubscription,
+} from './types'
 
 const baseURL = import.meta.env.VITE_API_BASE_URL || ''
 export const http = axios.create({ baseURL })
@@ -56,4 +62,25 @@ export const api = {
   settings: { product: async () => (await http.get<ProductSettingsSummary>('/api/settings/product')).data },
   search: async (knowledgeBaseId: string, query: string, topK = 5) => (await http.post<SearchHit[]>('/api/search', { knowledgeBaseId, query, topK })).data,
   conversations: { list: async (knowledgeBaseId?: string) => (await http.get<Conversation[]>('/api/conversations', { params: knowledgeBaseId ? { knowledgeBaseId } : {} })).data, create: async (knowledgeBaseId: string, title?: string) => (await http.post<Conversation>('/api/conversations', { knowledgeBaseId, title })).data, messages: async (id: string) => (await http.get<ChatMessage[]>(`/api/conversations/${id}/messages`)).data, send: async (id: string, message: string) => (await http.post<ChatResponse>(`/api/conversations/${id}/messages`, { message })).data, stream: streamConversation, remove: async (id: string) => { await http.delete(`/api/conversations/${id}`) } },
+  governance: {
+    overview: async (tenantId: string) => (await http.get<GovernanceOverview>('/api/governance/overview', { params: { tenantId } })).data,
+    ragProfile: async (knowledgeBaseId: string) => (await http.get<RagProfile>(`/api/governance/knowledge-bases/${knowledgeBaseId}/rag-profile`)).data,
+    saveRagProfile: async (knowledgeBaseId: string, body: RagProfileUpdate) => (await http.put<RagProfile>(`/api/governance/knowledge-bases/${knowledgeBaseId}/rag-profile`, body)).data,
+    runs: async (knowledgeBaseId: string) => (await http.get<RagRun[]>('/api/governance/runs', { params: { knowledgeBaseId } })).data,
+    audit: async (tenantId: string) => (await http.get<AuditLog[]>('/api/governance/audit', { params: { tenantId } })).data,
+    modelPrices: async (tenantId: string) => (await http.get<ModelPrice[]>('/api/governance/model-prices', { params: { tenantId } })).data,
+    saveModelPrice: async (tenantId: string, body: { model: string; inputCostPerMillionTokens: number; outputCostPerMillionTokens: number; isActive?: boolean }) => (await http.put<ModelPrice>('/api/governance/model-prices', body, { params: { tenantId } })).data,
+    prompts: async (tenantId: string) => (await http.get<PromptProfile[]>('/api/governance/prompts', { params: { tenantId } })).data,
+    savePrompt: async (tenantId: string, body: { id?: string | null; knowledgeBaseId?: string | null; name: string; plannerPrompt: string; answerPrompt: string; reviewerPrompt: string; isActive: boolean }) => (await http.post<PromptProfile>('/api/governance/prompts', body, { params: { tenantId } })).data,
+    webhooks: async (tenantId: string) => (await http.get<WebhookSubscription[]>('/api/governance/webhooks', { params: { tenantId } })).data,
+    saveWebhook: async (tenantId: string, body: { id?: string | null; name: string; url: string; eventTypes: string[]; secret?: string | null; isActive: boolean }) => (await http.post<WebhookSubscription>('/api/governance/webhooks', body, { params: { tenantId } })).data,
+    deleteWebhook: async (tenantId: string, id: string) => { await http.delete(`/api/governance/webhooks/${id}`, { params: { tenantId } }) },
+    testWebhook: async (tenantId: string, id: string) => { await http.post(`/api/governance/webhooks/${id}/test`, null, { params: { tenantId } }) },
+    datasets: async (tenantId: string) => (await http.get<EvaluationDataset[]>('/api/governance/evaluation/datasets', { params: { tenantId } })).data,
+    createDataset: async (tenantId: string, body: { knowledgeBaseId: string; name: string; description?: string }) => (await http.post<EvaluationDataset>('/api/governance/evaluation/datasets', body, { params: { tenantId } })).data,
+    cases: async (tenantId: string, datasetId: string) => (await http.get<EvaluationCase[]>(`/api/governance/evaluation/datasets/${datasetId}/cases`, { params: { tenantId } })).data,
+    addCase: async (tenantId: string, datasetId: string, body: { category: string; query: string; expectedAnswerContains?: string; requiresKnowledge: boolean }) => (await http.post<EvaluationCase>(`/api/governance/evaluation/datasets/${datasetId}/cases`, body, { params: { tenantId } })).data,
+    evaluationRuns: async (tenantId: string, datasetId?: string) => (await http.get<EvaluationRun[]>('/api/governance/evaluation/runs', { params: { tenantId, datasetId } })).data,
+    runEvaluation: async (tenantId: string, datasetId: string) => (await http.post<EvaluationRun>(`/api/governance/evaluation/datasets/${datasetId}/run`, null, { params: { tenantId } })).data,
+  },
 }
