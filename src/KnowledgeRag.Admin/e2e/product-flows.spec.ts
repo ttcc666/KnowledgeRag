@@ -131,7 +131,7 @@ test('official assistant-ui Thread renders ordered turns, in-message workflow, c
   await expect(page.getByText('Employees receive the documented benefit.', { exact: false }).last()).toBeVisible()
 
   if (isDesktop) {
-    await page.getByRole('button', { name: '关闭来源证据' }).click()
+    await page.getByTestId('source-panel').getByRole('button', { name: '关闭来源证据' }).click()
     await expect(page.getByTestId('source-panel')).toHaveCount(0)
     await inlineCitation.click()
     await expect(page.getByTestId('source-panel')).toBeVisible()
