@@ -34,8 +34,8 @@ public sealed class DashboardService(AppDbContext db, KnowledgeBaseAccessService
         var jobs = BuildJobs(docs, names, now);
         return new DashboardSummary(
             knowledgeBases.Count,
-            docs.Count(x => x.Status == DocumentStatus.Ready),
-            docs.Count(x => x.Status is DocumentStatus.Queued or DocumentStatus.Processing),
+            docs.Count(x => x.Status is DocumentStatus.Ready or DocumentStatus.Reindexing),
+            docs.Count(x => x.Status is DocumentStatus.Queued or DocumentStatus.Processing or DocumentStatus.Reindexing),
             docs.Count(x => x.Status == DocumentStatus.Failed),
             docs.Count(x => x.Status == DocumentStatus.Cancelled),
             docs.Sum(x => x.ChunkCount),
@@ -67,7 +67,7 @@ public sealed class DashboardService(AppDbContext db, KnowledgeBaseAccessService
             doc.LastError,
             doc.CreatedAt,
             doc.UpdatedAt,
-            Math.Max(0, ((doc.Status is DocumentStatus.Queued or DocumentStatus.Processing ? now : doc.UpdatedAt) - doc.CreatedAt).TotalSeconds),
+            Math.Max(0, ((doc.Status is DocumentStatus.Queued or DocumentStatus.Processing or DocumentStatus.Reindexing ? now : doc.UpdatedAt) - doc.CreatedAt).TotalSeconds),
             queued.TryGetValue(doc.Id, out var position) ? position : null)).ToList();
     }
 

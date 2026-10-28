@@ -18,6 +18,8 @@
 
 ### Added
 
+- 新增文档 **failure-safe staged blue-green reindex**：Ready 文档进入 `Reindexing` 后继续使用上一版 chunks / vectors 提供检索，新文档解析、切片和 Embedding 全部完成后才进入短暂 staging / 原子 chunk switch；不新增数据库字段或 migration。
+- Ingestion Operations 新增 `Reindexing` 状态、蓝绿重建/取消重建交互与 Playwright 回归；后端新增索引生命周期测试，覆盖 Ready → Reindexing 以及失败恢复 Ready。
 - 新增 **AI Usage Reservation / Ledger**：RAG Run 在 Agent 执行前先按 Planner、Embedding、LLM Reranker、Answer、Reviewer、Specialist 的最坏路径预留预算，执行后再按真实 Workflow 事件数量结算为逐模型 `estimated` usage line items。
 - 新增跨数据库预算策略回归测试，覆盖正在执行的 `reserved` Run 计入每日配额、预留成本计入月预算以及 Workflow 事件驱动的 usage 统计。
 - 新增 Webhook **CAP 异步投递管线**：每个订阅独立发布 delivery message，PostgreSQL 环境复用 CAP 持久化 storage / RabbitMQ 重试，避免外部 HTTP 阻塞 Chat / Evaluation 请求关键路径。
@@ -28,6 +30,8 @@
 
 ### Changed
 
+- `Ready` 与 `Reindexing` 文档都被检索层视为可查询；重建期间新 vectors 不在整个 Embedding 阶段提前进入在线向量空间，只在最终 staging 后切换，降低 Vector Top-K 被未激活 point 抢占的窗口。
+- 文档重新索引失败或取消时恢复 `Ready` 并保留上一版可检索索引；新版本成功激活后旧 vectors 再做 best-effort 清理，清理失败不会回滚新索引。
 - Budget / Daily Quota 从“执行前读取历史后判断”改为 **Serializable Transaction 预留 → 执行 → 结算**；并发会话会看到彼此的 reservation，降低多个 Run 同时越过剩余配额/预算的竞态风险。
 - RAG Run Trace 增加安全的 `usage.ledger`，保存 operation、model、calls、input/output token estimate、cost 与 `estimated=true`，不保存 prompt、chain-of-thought 或 secret；失败/取消的 Run 同样结算已观察到的调用，过期 reservation 自动释放。
 - Embedding 在没有显式 Model Price 时不再错误套用 Chat token 单价；Chat-based Planner / Answer / Reviewer / Specialist / LLM Reranker 继续使用模型价格或现有 Chat fallback。
@@ -42,6 +46,7 @@
 
 ### Fixed
 
+- 修复 Ready 文档重新索引时先删除旧 chunks / vectors，若解析、Embedding 或持久化中途失败会让原本可用文档失去检索能力的问题。
 - 修复并发 Conversation 仅依赖进程内 conversation lock 时，不同会话可能同时通过同一 Knowledge Base 的预算/每日配额检查并造成超额的问题。
 - 修复 SQLite 下 `RagRuntimeProfileService.EstimateCostAsync` 对 `DateTimeOffset UpdatedAt` 执行数据库端 `ORDER BY` 时抛出 `NotSupportedException`，导致 RAG 回答完成后在持久化 Run Trace / Cost 阶段返回 HTTP 500 的问题。
 - 增加 SQLite 集成回归，直接验证配置模型价格后的成本估算路径可正常执行并使用正确价格。

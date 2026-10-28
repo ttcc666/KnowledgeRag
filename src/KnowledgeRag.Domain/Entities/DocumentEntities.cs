@@ -6,7 +6,8 @@ public enum DocumentStatus
     Processing = 1,
     Ready = 2,
     Failed = 3,
-    Cancelled = 4
+    Cancelled = 4,
+    Reindexing = 5
 }
 
 public sealed class DocumentEntity

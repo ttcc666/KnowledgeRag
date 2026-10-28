@@ -50,7 +50,8 @@ public sealed class KnowledgeSearchService(
             if (pointIds.Length == 0) return result;
             var dbChunks = await (from c in db.DocumentChunks.AsNoTracking()
                                   join d in db.Documents.AsNoTracking() on c.DocumentId equals d.Id
-                                  where c.KnowledgeBaseId == knowledgeBaseId && pointIds.Contains(c.Id) && d.Status == DocumentStatus.Ready
+                                  where c.KnowledgeBaseId == knowledgeBaseId && pointIds.Contains(c.Id) &&
+                                        (d.Status == DocumentStatus.Ready || d.Status == DocumentStatus.Reindexing)
                                   select new { c.Id, c.DocumentId, d.FileName, c.ChunkIndex, c.Text }).ToListAsync(cancellationToken);
 
             var data = dbChunks.ToDictionary(x => x.Id);
