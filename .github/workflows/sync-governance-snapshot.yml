@@ -1,0 +1,39 @@
+name: sync-governance-snapshot
+
+on:
+  push:
+    branches:
+      - feat/platform-governance-suite
+    paths:
+      - .github/workflows/sync-governance-snapshot.yml
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/platform-governance-suite
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore
+        run: dotnet restore KnowledgeRag.NonAzure.sln
+      - name: Install dotnet-ef
+        run: dotnet tool install --global dotnet-ef --version 10.0.3
+      - name: Regenerate EF model snapshot
+        run: >-
+          dotnet ef migrations add GovernanceSnapshotSync
+          --project src/KnowledgeRag.Infrastructure/KnowledgeRag.Infrastructure.csproj
+          --startup-project src/KnowledgeRag.Api/KnowledgeRag.Api.csproj
+          --context AppDbContext
+      - name: Commit generated snapshot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/KnowledgeRag.Infrastructure/Persistence/Migrations
+          git commit -m "chore: sync governance EF model snapshot"
+          git push origin HEAD:feat/platform-governance-suite
