@@ -8,6 +8,7 @@ internal static class ServiceCollectionExtensions
     {
         services.AddScoped<TenantAccessService>();
         services.AddScoped<TenantService>();
+        services.AddScoped<TenantAiProviderService>();
         return services;
     }
 }
