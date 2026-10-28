@@ -18,10 +18,14 @@
 
 ### Added
 
+- 新增 RAG **Structured Citation Contract**：Answer Agent 使用 `[E#]` 绑定当前 Evidence，服务端确定性校验并转换为稳定的用户引用编号，只持久化答案实际引用的来源。
+- 新增 citation normalization 回归测试，覆盖引用重排、重复引用、非法 Evidence ID 和无引用回答。
 - 新增 `DEVELOPMENT_WORKFLOW.md`，正式记录分支、Draft PR、增量 CI、Ready 全量验证、Changelog、Hotfix、数据库与 Agent/RAG 变更的开发流程。
 
 ### Changed
 
+- Reviewer 增加强制引用审核规则：重要知识库事实必须具备有效 `[E#]`，缺失、越界或与 claim 不匹配的引用进入 `CitationErrors` 并使审核失败。
+- Chat Source 不再等同于“本轮所有检索结果”，只暴露最终答案真正引用到的 Evidence；Run Trace 记录 citation validation 统计。
 - CI 改为分层策略：Draft PR 根据改动路径选择 frontend / backend / native 测试；PR 转为 Ready、`main` push、手动触发和 nightly schedule 时强制完整 CI。
 - PR 分支不再同时触发 `push` 与 `pull_request` 两套重复 CI；`push` 仅监听 `main`。
 - 同一 PR 的新 commit 会通过 `concurrency.cancel-in-progress` 自动取消旧 CI，减少无效 runner 消耗。
@@ -32,6 +36,10 @@
 
 - 修复 SQLite 下 `RagRuntimeProfileService.EstimateCostAsync` 对 `DateTimeOffset UpdatedAt` 执行数据库端 `ORDER BY` 时抛出 `NotSupportedException`，导致 RAG 回答完成后在持久化 Run Trace / Cost 阶段返回 HTTP 500 的问题。
 - 增加 SQLite 集成回归，直接验证配置模型价格后的成本估算路径可正常执行并使用正确价格。
+
+### Security
+
+- 非法或不存在的 Evidence 引用不会作为可信 Citation 返回前端；Knowledge Base 内容仍按 untrusted data 处理，管理员 Prompt 不能覆盖强制 grounding / citation 规则。
 
 ---
 

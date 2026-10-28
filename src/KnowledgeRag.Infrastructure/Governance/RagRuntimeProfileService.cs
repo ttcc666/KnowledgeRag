@@ -62,8 +62,8 @@ public sealed class RagRuntimeProfileService(
             profile?.DailyRunLimit ?? 0,
             profile?.PromptProfileId,
             NullIfWhiteSpace(prompt?.PlannerPrompt),
-            NullIfWhiteSpace(prompt?.AnswerPrompt),
-            NullIfWhiteSpace(prompt?.ReviewerPrompt));
+            AppendMandatoryPolicy(prompt?.AnswerPrompt, AnswerCitationPolicy),
+            AppendMandatoryPolicy(prompt?.ReviewerPrompt, ReviewerCitationPolicy));
     }
 
     public async Task<decimal> EstimateCostAsync(Guid tenantId, string model, int inputTokens, int outputTokens, CancellationToken ct = default)
@@ -81,4 +81,22 @@ public sealed class RagRuntimeProfileService(
     }
 
     private static string? NullIfWhiteSpace(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    private static string AppendMandatoryPolicy(string? managedPrompt, string mandatoryPolicy)
+        => string.IsNullOrWhiteSpace(managedPrompt)
+            ? mandatoryPolicy
+            : managedPrompt.Trim() + "\n\n" + mandatoryPolicy;
+
+    private const string AnswerCitationPolicy = """
+        ## 强制引用契约
+        Evidence 片段使用 [E1]、[E2]... 标识。所有来自知识库的关键事实结论必须在对应句子后使用一个或多个 [E#] 引用。
+        只能引用当前提供且真实存在的 Evidence ID；不得伪造、猜测或引用不存在的编号。
+        不要用文件名、页码或裸 URL 代替 [E#]。Evidence 不足时直接说明不足，不得为了满足格式而制造引用。
+        """;
+
+    private const string ReviewerCitationPolicy = """
+        ## 强制引用审核契约
+        将 [E#] 视为机器可验证的 Evidence 引用。检查每个重要知识库事实是否有对应引用，并确认编号存在且内容支持该 claim。
+        缺失引用、引用不存在、引用与 claim 不匹配时写入 CitationErrors，并令 Supported=false。不得因为格式偏好之外的问题误判。
+        """;
 }
