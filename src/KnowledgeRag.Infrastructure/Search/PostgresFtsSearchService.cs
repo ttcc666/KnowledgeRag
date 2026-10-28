@@ -78,7 +78,7 @@ public sealed class PostgresFtsSearchService : ILexicalSearchService
     private void RequirePostgres()
     {
         if (!_database.Provider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase) && !_database.Provider.Equals("Postgres", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("SearchBackend:Lexical=pgvector 仅能在 Database:Provider=PostgreSql 时使用。");
+            throw new InvalidOperationException("SearchBackend:Lexical=postgres_fts 仅能在 Database:Provider=PostgreSql 时使用。");
     }
 
     private static string ValidateConfig(string value)
