@@ -75,6 +75,8 @@
 
 ### Fixed
 
+- 优化 Chat Agent Workflow 的消息内视觉层级：运行状态使用轻量引用块与独立阶段摘要呈现，完成阶段采用 `阶段 ✓`、当前阶段采用 `阶段中`，查询/证据统计与当前动作分层展示，减少连续圆点造成的正文感。
+- 优化回答底部 References：仅第一条显示一次“参考来源”，每个来源改为紧凑的 `[n] 文件名` 链接并增加稳定间距/换行，不再为每条重复“引用”和文件图标；点击仍打开当前 assistant message 对应的 Evidence Panel。
 - 修复 Chat Header 与 assistant turn 重复显示运行状态的问题；Agent Workflow 只在当前回答消息内以紧凑两行摘要呈现，通用 running indicator 仅保留无障碍文本，不再出现额外圆点。
 - 修复 External Store 未提供 branching/edit/reload 能力时仍出现 `2 / 2` BranchPicker、Edit / Refresh 控件的问题；assistant-ui UI 现在按 runtime capability 显示对应操作。
 - 改进 Chat 引用呈现：正文可信引用保留可见 `[n]` 并作为链接打开对应 Evidence，回答底部文档来源改为“引用 [n] 文件名”的轻量链接，不再使用填充 badge。

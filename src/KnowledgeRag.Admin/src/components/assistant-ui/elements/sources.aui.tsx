@@ -7,7 +7,6 @@ import {
   useState,
   type ComponentProps,
 } from "react";
-import { FileTextIcon } from "lucide-react";
 import { cva, type VariantProps } from "class-variance-authority";
 import type { SourceMessagePartComponent } from "@assistant-ui/react";
 import { cn } from "@/lib/utils";
@@ -114,21 +113,6 @@ function SourceTitle({ className, ...props }: ComponentProps<"span">) {
   );
 }
 
-function DocumentSourceIcon({ className, ...props }: ComponentProps<"span">) {
-  return (
-    <span
-      data-slot="source-document-icon"
-      className={cn(
-        "text-muted-foreground flex size-3 shrink-0 items-center justify-center",
-        className,
-      )}
-      {...props}
-    >
-      <FileTextIcon className="size-3" />
-    </span>
-  );
-}
-
 export type SourceProps = ComponentProps<"a"> &
   VariantProps<typeof sourceVariants>;
 
@@ -180,11 +164,22 @@ const SourcesImpl: SourceMessagePartComponent = (part) => {
   }
 
   if (part.sourceType === "document") {
+    const displayTitle = part.title || "来源";
+    const sourceMatch = typeof part.id === "string"
+      ? /^kr-source-(\d+)-/.exec(part.id)
+      : null;
+    const citationNumber = sourceMatch ? Number(sourceMatch[1]) : undefined;
+    const fileName = citationNumber
+      ? displayTitle.replace(/^\[\d+\]\s*/, "")
+      : displayTitle;
     const content = (
       <>
-        <span className="text-muted-foreground">引用</span>
-        <DocumentSourceIcon />
-        <SourceTitle>{part.title}</SourceTitle>
+        {citationNumber !== undefined && (
+          <span className="text-primary shrink-0 font-semibold tabular-nums">
+            [{citationNumber}]
+          </span>
+        )}
+        <SourceTitle className="max-w-52">{fileName}</SourceTitle>
       </>
     );
     const localHref = typeof part.id === "string" && part.id.startsWith("kr-source-")
@@ -193,16 +188,26 @@ const SourcesImpl: SourceMessagePartComponent = (part) => {
 
     if (localHref) {
       return (
-        <Source
-          href={localHref}
-          target="_self"
-          rel={undefined}
-          variant="ghost"
-          aria-label={`查看引用 ${part.title}`}
-          className="h-auto gap-1.5 rounded-none px-0 py-0 text-primary no-underline hover:bg-transparent hover:text-primary/80 hover:underline underline-offset-2"
-        >
-          {content}
-        </Source>
+        <>
+          {citationNumber === 1 && (
+            <span
+              data-slot="sources-label"
+              className="text-muted-foreground/80 me-2 inline-flex items-center text-xs font-medium"
+            >
+              参考来源
+            </span>
+          )}
+          <Source
+            href={localHref}
+            target="_self"
+            rel={undefined}
+            variant="ghost"
+            aria-label={`查看引用 ${citationNumber !== undefined ? `[${citationNumber}] ` : ""}${fileName}`}
+            className="text-muted-foreground hover:text-primary me-3 h-auto gap-1 rounded-md px-0.5 py-0.5 no-underline hover:bg-transparent hover:underline underline-offset-2"
+          >
+            {content}
+          </Source>
+        </>
       );
     }
 
