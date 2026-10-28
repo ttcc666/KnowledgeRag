@@ -176,8 +176,16 @@ test('official assistant-ui ThreadList can rename, archive and restore a convers
   const renameInput = page.getByRole('textbox', { name: 'Rename thread' })
   await renameInput.fill('Renamed policy')
   const renameRequest = page.waitForRequest((request) => request.url().endsWith('/api/conversations/c1') && request.method() === 'PATCH')
+  const regularRefresh = page.waitForResponse((response) => {
+    const url = new URL(response.url())
+    return response.request().method() === 'GET' && url.pathname === '/api/conversations' && url.searchParams.get('archived') !== 'true'
+  })
+  const archivedRefresh = page.waitForResponse((response) => {
+    const url = new URL(response.url())
+    return response.request().method() === 'GET' && url.pathname === '/api/conversations' && url.searchParams.get('archived') === 'true'
+  })
   await renameInput.press('Enter')
-  await renameRequest
+  await Promise.all([renameRequest, regularRefresh, archivedRefresh])
   const threadList = page.locator('[data-slot="aui_thread-list-root"]')
   const renamedThread = threadList.locator('[data-slot="aui_thread-list-item"]').filter({ hasText: 'Renamed policy' })
   await expect(renamedThread).toBeVisible()
