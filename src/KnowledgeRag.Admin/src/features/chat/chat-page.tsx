@@ -10,6 +10,7 @@ import { Archive, ArchiveRestore, Bot, FileText, Maximize2, Menu, MessageSquareP
 import { motion } from 'motion/react'
 import { toast } from 'sonner'
 import { AssistantThread } from './assistant-thread'
+import { flattenMessagePages, resolveRuntimeThreadId } from './chat-runtime-state'
 import { mergeProgressEvent } from './progress-events'
 import { api, getErrorMessage } from '@/lib/api'
 import { cn, formatDate } from '@/lib/utils'
@@ -43,6 +44,10 @@ export function ChatPage() {
   const conversations = useQuery({ queryKey: ['conversations', activeKb, false], queryFn: () => api.conversations.list(activeKb, false), enabled: !!activeKb })
   const archivedConversations = useQuery({ queryKey: ['conversations', activeKb, true], queryFn: () => api.conversations.list(activeKb, true), enabled: !!activeKb })
   const [conversationId, setConversationId] = useState('')
+  const runtimeThreadId = resolveRuntimeThreadId(conversationId, conversations.data, archivedConversations.data)
+  const selectedConversation = conversations.data?.find((item) => item.id === runtimeThreadId)
+    || archivedConversations.data?.find((item) => item.id === runtimeThreadId)
+  const selectedArchived = !!runtimeThreadId && !!archivedConversations.data?.some((item) => item.id === runtimeThreadId)
 
   useEffect(() => {
     if (activeKb && !conversationId && conversations.data?.length) setConversationId(conversations.data[0].id)
@@ -50,11 +55,14 @@ export function ChatPage() {
   useEffect(() => setConversationId(''), [activeKb])
 
   const messages = useInfiniteQuery({
-    queryKey: ['messages', conversationId],
-    queryFn: ({ pageParam }) => api.conversations.messagePage(conversationId, pageParam || undefined, 50),
+    queryKey: ['messages', runtimeThreadId || 'unselected'],
+    queryFn: ({ pageParam }) => {
+      if (!runtimeThreadId) throw new Error('Conversation is not available in the current thread list.')
+      return api.conversations.messagePage(runtimeThreadId, pageParam || undefined, 50)
+    },
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.hasEarlier && lastPage.previousCursor ? lastPage.previousCursor : undefined,
-    enabled: !!conversationId,
+    enabled: !!runtimeThreadId,
   })
 
   const [selectedSource, setSelectedSource] = useState<ChatSource | null>(null)
@@ -131,10 +139,10 @@ export function ChatPage() {
     }
   }, [activeKb, conversationId, invalidateConversationLists, qc, streaming])
 
-  const loadedMessages = useMemo<ChatMessage[]>(() => {
-    const pages = messages.data?.pages || []
-    return [...pages].reverse().flatMap((page) => page.messages)
-  }, [messages.data])
+  const loadedMessages = useMemo<ChatMessage[]>(
+    () => flattenMessagePages(messages.data?.pages),
+    [messages.data],
+  )
 
   const threadMessages = useMemo<ChatMessage[]>(() => {
     const history = [...loadedMessages]
@@ -151,17 +159,11 @@ export function ChatPage() {
     createdAt: new Date(message.createdAt),
   }), [])
 
-  const selectedConversation = useMemo(
-    () => conversations.data?.find((item) => item.id === conversationId) || archivedConversations.data?.find((item) => item.id === conversationId),
-    [archivedConversations.data, conversationId, conversations.data],
-  )
-  const selectedArchived = !!archivedConversations.data?.some((item) => item.id === conversationId)
-
   const runtime = useExternalStoreRuntime({
     messages: threadMessages,
     isRunning: streaming,
-    isLoading: !!conversationId && messages.isLoading,
-    isSendDisabled: streaming || !activeKb || selectedArchived,
+    isLoading: !!runtimeThreadId && messages.isLoading,
+    isSendDisabled: streaming || !activeKb || selectedArchived || (!!conversationId && !runtimeThreadId),
     convertMessage,
     onNew: async (message) => {
       const textPart = message.content.find((part) => part.type === 'text')
@@ -176,12 +178,13 @@ export function ChatPage() {
     adapters: {
       feedback: {
         submit: ({ message, type }) => {
-          if (!conversationId || message.id.startsWith('live-')) return
-          void api.conversations.feedback(conversationId, message.id, type).catch((error) => toast.error(getErrorMessage(error)))
+          if (!runtimeThreadId || message.id.startsWith('live-')) return
+          void api.conversations.feedback(runtimeThreadId, message.id, type).catch((error) => toast.error(getErrorMessage(error)))
         },
       },
       threadList: {
-        threadId: conversationId || undefined,
+        threadId: runtimeThreadId,
+        isLoading: conversations.isLoading || archivedConversations.isLoading,
         threads: (conversations.data || []).map((item) => ({ id: item.id, status: 'regular' as const, title: item.title })),
         archivedThreads: (archivedConversations.data || []).map((item) => ({ id: item.id, status: 'archived' as const, title: item.title })),
         onSwitchToNewThread: async () => {
@@ -253,10 +256,10 @@ export function ChatPage() {
     window.addEventListener('pointerup', onUp)
   }
 
-  const sourcesByMessageId = useMemo(() => Object.fromEntries(threadMessages.map((message) => [message.id, parseSources(message)])), [threadMessages])
+  const sourcesByMessageId = useMemo(() => Object.fromEntries(loadedMessages.map((message) => [message.id, parseSources(message)])), [loadedMessages])
   const traceMessageId = streaming
     ? 'live-assistant'
-    : [...threadMessages].reverse().find((message) => message.role.toLowerCase() === 'assistant')?.id || ''
+    : [...loadedMessages].reverse().find((message) => message.role.toLowerCase() === 'assistant')?.id || ''
 
   const conversationList = <ConversationList
     regular={conversations.data || []}
