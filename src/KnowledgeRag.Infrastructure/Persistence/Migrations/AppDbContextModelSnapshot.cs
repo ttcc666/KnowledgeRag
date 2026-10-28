@@ -905,6 +905,11 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Secret")
                         .IsRequired()
                         .HasMaxLength(1000)

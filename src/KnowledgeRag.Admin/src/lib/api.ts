@@ -5,7 +5,7 @@ import type {
   DashboardSummary, EvaluationCase, EvaluationDataset, EvaluationRun, GovernanceOverview, IngestionJobSummary,
   KnowledgeBaseMember, KnowledgeBaseSummary, KnowledgeDocument, ModelPrice, ProductSettingsSummary, PromptProfile,
   RagProfile, RagProfileUpdate, RagProgressEvent, RagRun, SearchHit, TenantMember, TenantSummary, UploadResponse,
-  UserSummary, WebhookSubscription,
+  UserSummary, WebhookProvider, WebhookSubscription,
 } from './types'
 
 const baseURL = import.meta.env.VITE_API_BASE_URL || ''
@@ -72,8 +72,9 @@ export const api = {
     saveModelPrice: async (tenantId: string, body: { model: string; inputCostPerMillionTokens: number; outputCostPerMillionTokens: number; isActive?: boolean }) => (await http.put<ModelPrice>('/api/governance/model-prices', body, { params: { tenantId } })).data,
     prompts: async (tenantId: string) => (await http.get<PromptProfile[]>('/api/governance/prompts', { params: { tenantId } })).data,
     savePrompt: async (tenantId: string, body: { id?: string | null; knowledgeBaseId?: string | null; name: string; plannerPrompt: string; answerPrompt: string; reviewerPrompt: string; isActive: boolean }) => (await http.post<PromptProfile>('/api/governance/prompts', body, { params: { tenantId } })).data,
+    webhookProviders: async () => (await http.get<WebhookProvider[]>('/api/governance/webhooks/providers')).data,
     webhooks: async (tenantId: string) => (await http.get<WebhookSubscription[]>('/api/governance/webhooks', { params: { tenantId } })).data,
-    saveWebhook: async (tenantId: string, body: { id?: string | null; name: string; url: string; eventTypes: string[]; secret?: string | null; isActive: boolean }) => (await http.post<WebhookSubscription>('/api/governance/webhooks', body, { params: { tenantId } })).data,
+    saveWebhook: async (tenantId: string, body: { id?: string | null; name: string; provider: string; url: string; eventTypes: string[]; secret?: string | null; isActive: boolean }) => (await http.post<WebhookSubscription>('/api/governance/webhooks', body, { params: { tenantId } })).data,
     deleteWebhook: async (tenantId: string, id: string) => { await http.delete(`/api/governance/webhooks/${id}`, { params: { tenantId } }) },
     testWebhook: async (tenantId: string, id: string) => { await http.post(`/api/governance/webhooks/${id}/test`, null, { params: { tenantId } }) },
     datasets: async (tenantId: string) => (await http.get<EvaluationDataset[]>('/api/governance/evaluation/datasets', { params: { tenantId } })).data,

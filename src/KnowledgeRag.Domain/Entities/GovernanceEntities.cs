@@ -92,6 +92,7 @@ public sealed class WebhookSubscriptionEntity
     public Guid Id { get; set; }
     public Guid TenantId { get; set; }
     public string Name { get; set; } = string.Empty;
+    public string Provider { get; set; } = "custom";
     public string Url { get; set; } = string.Empty;
     public string EventTypes { get; set; } = string.Empty;
     public string Secret { get; set; } = string.Empty;

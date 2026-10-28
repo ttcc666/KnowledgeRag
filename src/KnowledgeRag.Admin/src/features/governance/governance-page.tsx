@@ -145,13 +145,55 @@ function PromptPanel({ tenantId, knowledgeBaseId }: { tenantId: string; knowledg
 }
 
 function AutomationPanel({ tenantId }: { tenantId: string }) {
-  const qc = useQueryClient(); const hooks = useQuery({ queryKey: ['webhooks', tenantId], queryFn: () => api.governance.webhooks(tenantId) }); const [name, setName] = useState('Operations webhook'); const [url, setUrl] = useState(''); const [events, setEvents] = useState('rag.run.completed,evaluation.completed'); const [secret, setSecret] = useState('')
-  const save = useMutation({ mutationFn: () => api.governance.saveWebhook(tenantId, { name, url, eventTypes: events.split(',').map((x) => x.trim()).filter(Boolean), secret: secret || undefined, isActive: true }), onSuccess: async () => { setUrl(''); setSecret(''); await qc.invalidateQueries({ queryKey: ['webhooks', tenantId] }); toast.success('Webhook 已保存') }, onError: (error) => toast.error(getErrorMessage(error)) })
-  const remove = useMutation({ mutationFn: (id: string) => api.governance.deleteWebhook(tenantId, id), onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['webhooks', tenantId] }); toast.success('Webhook 已删除') } })
-  const test = useMutation({ mutationFn: (id: string) => api.governance.testWebhook(tenantId, id), onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['webhooks', tenantId] }); toast.success('测试事件已发送') }, onError: (error) => toast.error(getErrorMessage(error)) })
-  return <div className='grid gap-4 xl:grid-cols-[.85fr_1.15fr]'><Card><CardHeader><CardTitle className='text-sm'>Webhook Automation</CardTitle><CardDescription>HMAC-SHA256 签名，支持 `rag.run.completed`、`evaluation.completed`、`webhook.test` 或 `*`。</CardDescription></CardHeader><CardContent className='space-y-3'><Input value={name} onChange={(e) => setName(e.target.value)} placeholder='name' /><Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder='https://example.com/hooks/rag' /><Input value={events} onChange={(e) => setEvents(e.target.value)} placeholder='event1,event2' /><Input type='password' value={secret} onChange={(e) => setSecret(e.target.value)} placeholder='HMAC secret' /><Button disabled={!url.trim() || save.isPending} onClick={() => save.mutate()}><Plus className='size-3.5' />创建 Webhook</Button></CardContent></Card><Card><CardHeader><CardTitle className='text-sm'>Subscriptions</CardTitle></CardHeader><CardContent className='space-y-2'>{hooks.data?.map((hook) => <div key={hook.id} className='rounded-xl border p-3'><div className='flex items-start justify-between gap-3'><div className='min-w-0'><div className='flex items-center gap-2 text-xs font-medium'>{hook.name}<Badge variant={hook.isActive ? 'success' : 'outline'}>{hook.isActive ? 'active' : 'disabled'}</Badge></div><div className='mt-1 truncate text-[10px] text-muted-foreground'>{hook.url}</div><div className='mt-1 text-[10px] text-muted-foreground'>{hook.eventTypes}{hook.lastStatusCode ? ` · last HTTP ${hook.lastStatusCode}` : ''}{hook.lastError ? ` · ${hook.lastError}` : ''}</div></div><div className='flex gap-1'><Button size='icon-sm' variant='outline' title='发送测试' onClick={() => test.mutate(hook.id)}><Send className='size-3.5' /></Button><Button size='icon-sm' variant='ghost' title='删除' onClick={() => remove.mutate(hook.id)}><Trash2 className='size-3.5 text-destructive' /></Button></div></div></div>) || <div className='text-xs text-muted-foreground'>暂无 Webhook。</div>}</CardContent></Card></div>
+  const qc = useQueryClient()
+  const providers = useQuery({ queryKey: ['webhook-providers'], queryFn: () => api.governance.webhookProviders() })
+  const hooks = useQuery({ queryKey: ['webhooks', tenantId], queryFn: () => api.governance.webhooks(tenantId) })
+  const [name, setName] = useState('Operations webhook')
+  const [provider, setProvider] = useState('custom')
+  const [url, setUrl] = useState('')
+  const [events, setEvents] = useState('rag.run.completed,evaluation.completed')
+  const [secret, setSecret] = useState('')
+  const selectedProvider = providers.data?.find((item) => item.id === provider)
+  const save = useMutation({
+    mutationFn: () => api.governance.saveWebhook(tenantId, { name, provider, url, eventTypes: events.split(',').map((x) => x.trim()).filter(Boolean), secret: secret || undefined, isActive: true }),
+    onSuccess: async () => { setUrl(''); setSecret(''); await qc.invalidateQueries({ queryKey: ['webhooks', tenantId] }); toast.success('通信渠道已保存') },
+    onError: (error) => toast.error(getErrorMessage(error)),
+  })
+  const remove = useMutation({ mutationFn: (id: string) => api.governance.deleteWebhook(tenantId, id), onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['webhooks', tenantId] }); toast.success('通信渠道已删除') } })
+  const test = useMutation({ mutationFn: (id: string) => api.governance.testWebhook(tenantId, id), onSuccess: async () => { await qc.invalidateQueries({ queryKey: ['webhooks', tenantId] }); toast.success('测试消息已发送') }, onError: (error) => toast.error(getErrorMessage(error)) })
+  return <div className='grid gap-4 xl:grid-cols-[.85fr_1.15fr]'>
+    <Card>
+      <CardHeader><CardTitle className='text-sm'>Webhook Automation · 通信渠道</CardTitle><CardDescription>选择平台并填写机器人 Webhook URL 即可接入。常见平台自动转换消息格式；自定义 Webhook 保留原始 JSON 与 HMAC-SHA256 签名。</CardDescription></CardHeader>
+      <CardContent className='space-y-3'>
+        <Field label='接入平台'>
+          <Select value={provider} onValueChange={setProvider}>
+            <SelectTrigger><SelectValue placeholder='选择通信平台' /></SelectTrigger>
+            <SelectContent>{providers.data?.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent>
+          </Select>
+        </Field>
+        {selectedProvider && <p className='rounded-lg bg-muted/50 px-3 py-2 text-xs leading-5 text-muted-foreground'>{selectedProvider.description}</p>}
+        <Field label='渠道名称'><Input value={name} onChange={(e) => setName(e.target.value)} placeholder='例如：研发告警群' /></Field>
+        <Field label='机器人 Webhook URL'><Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={selectedProvider?.urlPlaceholder ?? 'https://example.com/hooks/rag'} /></Field>
+        <Field label='订阅事件'><Input value={events} onChange={(e) => setEvents(e.target.value)} placeholder='rag.run.completed,evaluation.completed 或 *' /></Field>
+        <Field label={selectedProvider?.secretLabel ?? '签名密钥（可选）'}><Input type='password' value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={selectedProvider?.secretHint ?? '可选；仅自定义 / 支持签名的平台需要'} /></Field>
+        <div className='flex flex-wrap items-center justify-between gap-2'><span className='text-[10px] text-muted-foreground'>密钥仅用于服务端签名，API 不会返回明文。</span><Button disabled={!name.trim() || !url.trim() || save.isPending} onClick={() => save.mutate()}><Plus className='size-3.5' />创建渠道</Button></div>
+      </CardContent>
+    </Card>
+    <Card>
+      <CardHeader><CardTitle className='text-sm'>已配置渠道</CardTitle><CardDescription>每个渠道独立订阅事件、记录投递结果，并可发送测试消息。</CardDescription></CardHeader>
+      <CardContent className='space-y-2'>{hooks.data?.map((hook) => <div key={hook.id} className='rounded-xl border p-3'>
+        <div className='flex items-start justify-between gap-3'>
+          <div className='min-w-0'>
+            <div className='flex flex-wrap items-center gap-2 text-xs font-medium'>{hook.name}<Badge variant={hook.isActive ? 'success' : 'outline'}>{hook.isActive ? 'active' : 'disabled'}</Badge><Badge variant='outline'>{providers.data?.find((item) => item.id === hook.provider)?.name ?? hook.provider ?? 'Custom'}</Badge></div>
+            <div className='mt-1 truncate text-[10px] text-muted-foreground'>{hook.url}</div>
+            <div className='mt-1 text-[10px] text-muted-foreground'>{hook.eventTypes}{hook.lastStatusCode ? ` · last HTTP ${hook.lastStatusCode}` : ''}{hook.lastError ? ` · ${hook.lastError}` : ''}</div>
+          </div>
+          <div className='flex gap-1'><Button size='icon-sm' variant='outline' title='发送测试' onClick={() => test.mutate(hook.id)}><Send className='size-3.5' /></Button><Button size='icon-sm' variant='ghost' title='删除' onClick={() => remove.mutate(hook.id)}><Trash2 className='size-3.5 text-destructive' /></Button></div>
+        </div>
+      </div>) || <div className='text-xs text-muted-foreground'>暂无通信渠道。</div>}</CardContent>
+    </Card>
+  </div>
 }
-
 function AgentsPanel({ knowledgeBaseId }: { knowledgeBaseId: string }) {
   const profile = useQuery({ queryKey: ['rag-profile', knowledgeBaseId], queryFn: () => api.governance.ragProfile(knowledgeBaseId), enabled: !!knowledgeBaseId })
   const agents = [

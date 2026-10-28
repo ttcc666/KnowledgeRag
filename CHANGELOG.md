@@ -18,6 +18,8 @@
 
 ### Added
 
+- 新增 **统一通信渠道适配层**：Webhook Automation 支持 Slack、Discord、Microsoft Teams、飞书/Lark、钉钉、企业微信群机器人及自定义 HTTP Webhook；通过平台下拉选择、URL 与可选签名密钥配置完成接入。
+- 新增通信渠道 Provider Catalog API 与平台专属消息格式 / 签名适配；原自定义 JSON、HMAC-SHA256、事件筛选、CAP 异步投递、重试及 SSRF 防护保持兼容。
 - 新增 **Citation-aware Evaluation v2**：Evaluation 与 Chat 共用 Structured Citation Contract，知识型 fact case 只有在答案引用当前 Evidence 且引用 ID 合法时才算 grounded，不再把“检索到了 Source”直接等价为“回答有依据”。
 - Evaluation `ResultsJson` 升级为 versioned schema（`schemaVersion=2` / `evaluatorVersion=citation-aware-v2`），记录逐 Case 检查项、retrieved/cited source 数、引用合法性、分类统计、no-answer accuracy、citation validity、RAG Profile 安全快照与 baseline regression delta。
 - 新增 Evaluation v2 确定性回归测试，覆盖“有检索但无引用”、有效 Evidence 引用、伪造 Evidence ID、正确 no-answer abstention 与错误强答。

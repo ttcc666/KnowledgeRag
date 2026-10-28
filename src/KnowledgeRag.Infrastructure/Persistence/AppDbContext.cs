@@ -218,6 +218,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.ToTable("WebhookSubscriptions");
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Name).HasMaxLength(200);
+            entity.Property(x => x.Provider).HasMaxLength(50);
             entity.Property(x => x.Url).HasMaxLength(2000);
             entity.Property(x => x.EventTypes).HasMaxLength(1000);
             entity.Property(x => x.Secret).HasMaxLength(1000);
