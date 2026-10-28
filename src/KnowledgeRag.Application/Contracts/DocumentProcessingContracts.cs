@@ -2,7 +2,7 @@ using KnowledgeRag.Domain.Entities;
 
 namespace KnowledgeRag.Application.Contracts;
 
-public sealed record DocumentIndexRequested(Guid DocumentId, Guid KnowledgeBaseId, Guid UserId);
+public sealed record DocumentIndexRequested(Guid DocumentId, Guid KnowledgeBaseId, Guid UserId, bool Reindex = false);
 
 public sealed record DocumentProcessingNotification(
     Guid DocumentId,

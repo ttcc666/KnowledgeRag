@@ -24,7 +24,8 @@ public sealed class Bm25SearchService(AppDbContext db, IOptions<RagOptions> opti
         var raw = await (
             from c in db.DocumentChunks.AsNoTracking()
             join d in db.Documents.AsNoTracking() on c.DocumentId equals d.Id
-            where c.KnowledgeBaseId == knowledgeBaseId && d.Status == DocumentStatus.Ready
+            where c.KnowledgeBaseId == knowledgeBaseId &&
+                  (d.Status == DocumentStatus.Ready || d.Status == DocumentStatus.Reindexing)
             orderby c.CreatedAt descending
             select new
             {

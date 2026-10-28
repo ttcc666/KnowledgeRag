@@ -38,7 +38,8 @@ public sealed class KnowledgeIngestionService(
         {
             var duplicate = await db.Documents.AsNoTracking().AnyAsync(
                 x => x.KnowledgeBaseId == knowledgeBaseId && x.Sha256 == saved.Sha256 &&
-                     (x.Status == DocumentStatus.Queued || x.Status == DocumentStatus.Processing || x.Status == DocumentStatus.Ready),
+                     (x.Status == DocumentStatus.Queued || x.Status == DocumentStatus.Processing ||
+                      x.Status == DocumentStatus.Ready || x.Status == DocumentStatus.Reindexing),
                 cancellationToken);
             if (duplicate)
             {
@@ -64,7 +65,7 @@ public sealed class KnowledgeIngestionService(
 
             try
             {
-                await PersistAndPublishAsync(document, userId, isNew: true, cancellationToken);
+                await PersistAndPublishAsync(document, userId, isNew: true, reindex: false, cancellationToken);
             }
             catch
             {
@@ -92,18 +93,33 @@ public sealed class KnowledgeIngestionService(
     {
         var document = await db.Documents.SingleOrDefaultAsync(x => x.Id == documentId && x.KnowledgeBaseId == knowledgeBaseId, cancellationToken)
             ?? throw new KeyNotFoundException("文档不存在。");
-        if (document.Status is DocumentStatus.Queued or DocumentStatus.Processing)
+        if (DocumentIndexLifecycle.IsBusy(document.Status))
             throw new InvalidOperationException("文档已经在处理队列中。");
         if (document.Status == DocumentStatus.Ready && !allowReady)
             throw new InvalidOperationException("Ready 文档请使用重新索引操作。");
         if (document.Status is not (DocumentStatus.Failed or DocumentStatus.Cancelled or DocumentStatus.Ready))
             throw new InvalidOperationException("当前状态不能重新加入索引队列。");
 
-        document.Status = DocumentStatus.Queued;
+        var reindex = allowReady && document.Status == DocumentStatus.Ready;
+        var previousStatus = document.Status;
+        var previousError = document.LastError;
+        document.Status = reindex ? DocumentIndexLifecycle.BeginReindex(document.Status) : DocumentStatus.Queued;
         document.LastError = null;
         document.UpdatedAt = DateTimeOffset.UtcNow;
-        await PersistAndPublishAsync(document, userId, isNew: false, cancellationToken);
-        await NotifySafeAsync(document, userId, 0, allowReady ? "reindex_queued" : "retry_queued", cancellationToken);
+        try
+        {
+            await PersistAndPublishAsync(document, userId, isNew: false, reindex, cancellationToken);
+        }
+        catch
+        {
+            document.Status = previousStatus;
+            document.LastError = previousError;
+            document.UpdatedAt = DateTimeOffset.UtcNow;
+            try { await db.SaveChangesAsync(CancellationToken.None); }
+            catch (Exception saveEx) { logger.LogError(saveEx, "Failed to restore document state after queue publish failure for {DocumentId}", document.Id); }
+            throw;
+        }
+        await NotifySafeAsync(document, userId, 0, reindex ? "reindex_queued" : "retry_queued", cancellationToken);
         return document;
     }
 
@@ -111,8 +127,17 @@ public sealed class KnowledgeIngestionService(
     {
         var document = await db.Documents.SingleOrDefaultAsync(x => x.Id == documentId && x.KnowledgeBaseId == knowledgeBaseId, cancellationToken)
             ?? throw new KeyNotFoundException("文档不存在。");
+        if (document.Status == DocumentStatus.Reindexing)
+        {
+            document.Status = DocumentStatus.Ready;
+            document.LastError = "重新索引已取消，继续使用上一版索引。";
+            document.UpdatedAt = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(cancellationToken);
+            await NotifySafeAsync(document, userId, 100, "reindex_cancelled", cancellationToken, document.ChunkCount, document.LastError);
+            return document;
+        }
         if (document.Status is not (DocumentStatus.Queued or DocumentStatus.Processing))
-            throw new InvalidOperationException("只有排队中或处理中的任务可以取消。");
+            throw new InvalidOperationException("只有排队中、处理中的任务或重新索引任务可以取消。");
         document.Status = DocumentStatus.Cancelled;
         document.LastError = null;
         document.UpdatedAt = DateTimeOffset.UtcNow;
@@ -121,9 +146,9 @@ public sealed class KnowledgeIngestionService(
         return document;
     }
 
-    private async Task PersistAndPublishAsync(DocumentEntity document, Guid userId, bool isNew, CancellationToken cancellationToken)
+    private async Task PersistAndPublishAsync(DocumentEntity document, Guid userId, bool isNew, bool reindex, CancellationToken cancellationToken)
     {
-        var message = new DocumentIndexRequested(document.Id, document.KnowledgeBaseId, userId);
+        var message = new DocumentIndexRequested(document.Id, document.KnowledgeBaseId, userId, reindex);
         if (_database.Provider.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase) || _database.Provider.Equals("Postgres", StringComparison.OrdinalIgnoreCase))
         {
             using var transaction = db.Database.BeginTransaction(capPublisher, autoCommit: false);
@@ -145,54 +170,59 @@ public sealed class KnowledgeIngestionService(
         using var activity = Telemetry.ActivitySource.StartActivity("rag.ingest.background");
         activity?.SetTag("rag.document_id", request.DocumentId.ToString());
         activity?.SetTag("rag.knowledge_base_id", request.KnowledgeBaseId.ToString());
+        activity?.SetTag("rag.reindex", request.Reindex);
         var document = await db.Documents.SingleOrDefaultAsync(x => x.Id == request.DocumentId && x.KnowledgeBaseId == request.KnowledgeBaseId, cancellationToken);
-        if (document is null || document.Status is DocumentStatus.Ready or DocumentStatus.Cancelled) return;
+        if (document is null || document.Status == DocumentStatus.Cancelled) return;
+        if (request.Reindex)
+        {
+            if (document.Status != DocumentStatus.Reindexing) return;
+        }
+        else if (document.Status is DocumentStatus.Ready or DocumentStatus.Reindexing)
+        {
+            return;
+        }
 
-        var currentPointIds = new List<Guid>();
+        var newPointIds = new List<Guid>();
+        var chunkEntities = new List<DocumentChunkEntity>();
         string? parsePath = null;
+        var activated = false;
         try
         {
-            document.Status = DocumentStatus.Processing;
-            document.LastError = null;
-            document.UpdatedAt = DateTimeOffset.UtcNow;
-            await db.SaveChangesAsync(cancellationToken);
-            await NotifySafeAsync(document, request.UserId, 5, "processing", cancellationToken);
-            await EnsureNotCancelledAsync(document, cancellationToken);
+            if (!request.Reindex)
+            {
+                document.Status = DocumentStatus.Processing;
+                document.LastError = null;
+                document.UpdatedAt = DateTimeOffset.UtcNow;
+                await db.SaveChangesAsync(cancellationToken);
+            }
+            await NotifySafeAsync(document, request.UserId, 5, request.Reindex ? "reindexing" : "processing", cancellationToken);
+            await EnsureActiveAsync(document, request.Reindex, cancellationToken);
 
             await using var source = await fileStorage.OpenReadAsync(document.KnowledgeBaseId, document.StoredFileName, cancellationToken)
                 ?? throw new FileNotFoundException("原始文档文件不存在，无法继续索引。", document.FileName);
             parsePath = Path.Combine(Path.GetTempPath(), $"knowledge-rag-{document.Id:N}{Path.GetExtension(document.FileName)}");
             await using (var target = File.Create(parsePath)) await source.CopyToAsync(target, cancellationToken);
-            await EnsureNotCancelledAsync(document, cancellationToken);
+            await EnsureActiveAsync(document, request.Reindex, cancellationToken);
 
-            await NotifySafeAsync(document, request.UserId, 15, "parsing", cancellationToken);
+            await NotifySafeAsync(document, request.UserId, 15, request.Reindex ? "reindex_parsing" : "parsing", cancellationToken);
             var text = await parser.ExtractTextAsync(parsePath, cancellationToken);
-            await EnsureNotCancelledAsync(document, cancellationToken);
-            await NotifySafeAsync(document, request.UserId, 30, "chunking", cancellationToken);
+            await EnsureActiveAsync(document, request.Reindex, cancellationToken);
+            await NotifySafeAsync(document, request.UserId, 30, request.Reindex ? "reindex_chunking" : "chunking", cancellationToken);
             var chunks = chunker.Split(text);
             if (chunks.Count == 0) throw new InvalidOperationException("没有从文件中提取到可索引文本。");
             activity?.SetTag("rag.chunk_count", chunks.Count);
-            await EnsureNotCancelledAsync(document, cancellationToken);
+            await EnsureActiveAsync(document, request.Reindex, cancellationToken);
 
-            var previousChunks = await db.DocumentChunks.Where(x => x.DocumentId == document.Id).ToListAsync(cancellationToken);
-            if (previousChunks.Count > 0)
-            {
-                await vectorStore.DeleteAsync(previousChunks.Select(x => x.Id).ToList(), cancellationToken);
-                db.DocumentChunks.RemoveRange(previousChunks);
-                await db.SaveChangesAsync(cancellationToken);
-            }
-
-            var chunkEntities = new List<DocumentChunkEntity>(chunks.Count);
             for (var offset = 0; offset < chunks.Count; offset += _rag.EmbeddingBatchSize)
             {
-                await EnsureNotCancelledAsync(document, cancellationToken);
+                await EnsureActiveAsync(document, request.Reindex, cancellationToken);
                 var batch = chunks.Skip(offset).Take(_rag.EmbeddingBatchSize).ToList();
                 var vectors = await embeddings.GenerateBatchAsync(batch, cancellationToken);
                 var points = new List<VectorPoint>(batch.Count);
                 for (var i = 0; i < batch.Count; i++)
                 {
                     var chunkId = Guid.NewGuid();
-                    currentPointIds.Add(chunkId);
+                    newPointIds.Add(chunkId);
                     var chunkIndex = offset + i;
                     chunkEntities.Add(new DocumentChunkEntity
                     {
@@ -209,23 +239,32 @@ public sealed class KnowledgeIngestionService(
                 foreach (var upsertBatch in points.Chunk(_rag.UpsertBatchSize)) await vectorStore.UpsertAsync(upsertBatch, cancellationToken);
                 var completed = Math.Min(offset + batch.Count, chunks.Count);
                 var progress = 40 + (int)Math.Round(45d * completed / chunks.Count);
-                await NotifySafeAsync(document, request.UserId, progress, "embedding", cancellationToken, chunkEntities.Count);
+                await NotifySafeAsync(document, request.UserId, progress, request.Reindex ? "reindex_embedding" : "embedding", cancellationToken, chunkEntities.Count);
             }
 
-            await EnsureNotCancelledAsync(document, cancellationToken);
-            await NotifySafeAsync(document, request.UserId, 90, "storing", cancellationToken, chunkEntities.Count);
-            db.DocumentChunks.AddRange(chunkEntities);
-            document.ChunkCount = chunkEntities.Count;
-            document.Status = DocumentStatus.Ready;
-            document.LastError = null;
-            document.UpdatedAt = DateTimeOffset.UtcNow;
-            await db.SaveChangesAsync(cancellationToken);
-            await NotifySafeAsync(document, request.UserId, 100, "completed", cancellationToken, document.ChunkCount);
+            await NotifySafeAsync(document, request.UserId, 90, request.Reindex ? "reindex_switching" : "storing", cancellationToken, chunkEntities.Count);
+            var previousPointIds = await ActivateChunkSetAsync(document, chunkEntities, request.Reindex, cancellationToken);
+            activated = true;
+            await CleanupOldVectorsSafeAsync(previousPointIds, document.Id);
+            await NotifySafeAsync(document, request.UserId, 100, request.Reindex ? "reindex_completed" : "completed", cancellationToken, document.ChunkCount);
+        }
+        catch (DocumentReindexCancelledException)
+        {
+            await CleanupVectorsAsync(newPointIds, document.Id);
+            DetachStagedChunks(document.Id);
+            await db.Entry(document).ReloadAsync(CancellationToken.None);
+            if (document.Status != DocumentStatus.Ready)
+            {
+                document.Status = DocumentStatus.Ready;
+                document.UpdatedAt = DateTimeOffset.UtcNow;
+                await db.SaveChangesAsync(CancellationToken.None);
+            }
+            await NotifySafeAsync(document, request.UserId, 100, "reindex_cancelled", CancellationToken.None, document.ChunkCount, document.LastError);
         }
         catch (DocumentProcessingCancelledException)
         {
-            await CleanupVectorsAsync(currentPointIds, document.Id);
-            foreach (var entry in db.ChangeTracker.Entries<DocumentChunkEntity>().Where(x => x.Entity.DocumentId == document.Id).ToList()) entry.State = EntityState.Detached;
+            await CleanupVectorsAsync(newPointIds, document.Id);
+            DetachStagedChunks(document.Id);
             await db.Entry(document).ReloadAsync(CancellationToken.None);
             document.Status = DocumentStatus.Cancelled;
             document.LastError = null;
@@ -235,17 +274,30 @@ public sealed class KnowledgeIngestionService(
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            if (!activated) await CleanupVectorsAsync(newPointIds, document.Id);
             throw;
         }
         catch (Exception ex)
         {
             activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Error, ex.Message);
-            await CleanupVectorsAsync(currentPointIds, document.Id);
-            foreach (var entry in db.ChangeTracker.Entries<DocumentChunkEntity>().Where(x => x.Entity.DocumentId == document.Id).ToList()) entry.State = EntityState.Detached;
-            document.Status = DocumentStatus.Failed;
+            if (!activated) await CleanupVectorsAsync(newPointIds, document.Id);
+            DetachStagedChunks(document.Id);
+            await db.Entry(document).ReloadAsync(CancellationToken.None);
             document.LastError = ex.Message.Length <= 4000 ? ex.Message : ex.Message[..4000];
-            document.ChunkCount = 0;
             document.UpdatedAt = DateTimeOffset.UtcNow;
+
+            if (request.Reindex)
+            {
+                document.Status = DocumentIndexLifecycle.RestoreSearchableVersionAfterReindexFailure();
+                try { await db.SaveChangesAsync(CancellationToken.None); }
+                catch (Exception saveEx) { logger.LogError(saveEx, "Failed to persist reindex failure for document {DocumentId}", document.Id); }
+                await NotifySafeAsync(document, request.UserId, 100, "reindex_failed", CancellationToken.None, document.ChunkCount, document.LastError);
+                logger.LogWarning(ex, "Reindex failed for document {DocumentId}; previous searchable index remains active", document.Id);
+                return;
+            }
+
+            document.Status = DocumentStatus.Failed;
+            document.ChunkCount = 0;
             try { await db.SaveChangesAsync(CancellationToken.None); }
             catch (Exception saveEx) { logger.LogError(saveEx, "Failed to persist indexing failure for document {DocumentId}", document.Id); }
             await NotifySafeAsync(document, request.UserId, 100, "failed", CancellationToken.None, error: document.LastError);
@@ -257,17 +309,66 @@ public sealed class KnowledgeIngestionService(
         }
     }
 
-    private async Task EnsureNotCancelledAsync(DocumentEntity document, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<Guid>> ActivateChunkSetAsync(
+        DocumentEntity document,
+        IReadOnlyCollection<DocumentChunkEntity> chunks,
+        bool reindex,
+        CancellationToken cancellationToken)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await EnsureActiveAsync(document, reindex, cancellationToken);
+        var previousChunks = await db.DocumentChunks.Where(x => x.DocumentId == document.Id).ToListAsync(cancellationToken);
+        var previousPointIds = previousChunks.Select(x => x.Id).ToList();
+        if (previousChunks.Count > 0)
+        {
+            db.DocumentChunks.RemoveRange(previousChunks);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        db.DocumentChunks.AddRange(chunks);
+        document.ChunkCount = chunks.Count;
+        document.Status = DocumentStatus.Ready;
+        document.LastError = null;
+        document.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return previousPointIds;
+    }
+
+    private async Task EnsureActiveAsync(DocumentEntity document, bool reindex, CancellationToken cancellationToken)
     {
         await db.Entry(document).ReloadAsync(cancellationToken);
+        if (reindex)
+        {
+            if (document.Status != DocumentStatus.Reindexing) throw new DocumentReindexCancelledException();
+            return;
+        }
         if (document.Status == DocumentStatus.Cancelled) throw new DocumentProcessingCancelledException();
+    }
+
+    private void DetachStagedChunks(Guid documentId)
+    {
+        foreach (var entry in db.ChangeTracker.Entries<DocumentChunkEntity>().Where(x => x.Entity.DocumentId == documentId).ToList())
+            entry.State = EntityState.Detached;
     }
 
     private async Task CleanupVectorsAsync(IReadOnlyCollection<Guid> pointIds, Guid documentId)
     {
         if (pointIds.Count == 0) return;
         try { await vectorStore.DeleteAsync(pointIds.ToList(), CancellationToken.None); }
-        catch (Exception cleanupEx) { logger.LogWarning(cleanupEx, "Failed to clean vectors for document {DocumentId}", documentId); }
+        catch (Exception cleanupEx) { logger.LogWarning(cleanupEx, "Failed to clean staged vectors for document {DocumentId}", documentId); }
+    }
+
+    private async Task CleanupOldVectorsSafeAsync(IReadOnlyCollection<Guid> pointIds, Guid documentId)
+    {
+        if (pointIds.Count == 0) return;
+        try { await vectorStore.DeleteAsync(pointIds.ToList(), CancellationToken.None); }
+        catch (Exception cleanupEx)
+        {
+            // Old point IDs no longer have matching DocumentChunk rows, so search result hydration
+            // rejects them. Log for operational cleanup without rolling back the newly active index.
+            logger.LogWarning(cleanupEx, "Failed to clean previous vectors after reindex switch for document {DocumentId}", documentId);
+        }
     }
 
     public async Task<IReadOnlyList<DocumentEntity>> ListAsync(Guid knowledgeBaseId, CancellationToken cancellationToken = default)
@@ -288,7 +389,7 @@ public sealed class KnowledgeIngestionService(
     {
         var document = await db.Documents.SingleOrDefaultAsync(x => x.Id == documentId && x.KnowledgeBaseId == knowledgeBaseId, cancellationToken);
         if (document is null) return false;
-        if (document.Status is DocumentStatus.Queued or DocumentStatus.Processing)
+        if (DocumentIndexLifecycle.IsBusy(document.Status))
             throw new InvalidOperationException("文档正在后台索引，请先取消任务或等待处理完成。");
         var pointIds = await db.DocumentChunks.AsNoTracking().Where(x => x.DocumentId == documentId).Select(x => x.Id).ToListAsync(cancellationToken);
         await vectorStore.DeleteAsync(pointIds, cancellationToken);
@@ -312,6 +413,7 @@ public sealed class KnowledgeIngestionService(
     }
 
     private sealed class DocumentProcessingCancelledException : Exception;
+    private sealed class DocumentReindexCancelledException : Exception;
 }
 
 public sealed record DocumentDownload(Stream Stream, string ContentType, string FileName);
