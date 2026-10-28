@@ -436,7 +436,7 @@ internal sealed class DiscordWebhookChannelAdapter : IWebhookChannelAdapter
                 new
                 {
                     title = WebhookChannelAdapterHelpers.Limit($"{WebhookChannelAdapterHelpers.SeverityEmoji(card.Severity)} {card.Title}", 256),
-                    description = string.IsNullOrWhiteSpace(card.Summary) ? null : WebhookChannelAdapterHelpers.Limit(card.Summary!, 2048),
+                    description = string.IsNullOrWhiteSpace(card.Summary) ? "\u200B" : WebhookChannelAdapterHelpers.Limit(card.Summary!, 2048),
                     color = WebhookChannelAdapterHelpers.DiscordColor(card.Severity),
                     fields = card.Fields.Take(25).Select(field => new
                     {
@@ -483,7 +483,6 @@ internal sealed class TeamsWebhookChannelAdapter : IWebhookChannelAdapter
                 contentType = "application/vnd.microsoft.card.adaptive",
                 contentUrl = (string?)null,
                 content = new {
-                    schema = "http://adaptivecards.io/schemas/adaptive-card.json",
                     type = "AdaptiveCard", version = "1.4", body = body.ToArray()
                 }
             }}
@@ -503,7 +502,11 @@ internal sealed class FeishuWebhookChannelAdapter : IWebhookChannelAdapter
         var card = WebhookChannelMessageFormatter.Present(delivery);
         var elements = new List<object>();
         if (!string.IsNullOrWhiteSpace(card.Summary))
-            elements.Add(new { tag = "markdown", content = WebhookChannelAdapterHelpers.EscapeAngleMarkup(card.Summary!) });
+            elements.Add(new
+            {
+                tag = "div",
+                text = new { tag = "lark_md", content = WebhookChannelAdapterHelpers.EscapeAngleMarkup(card.Summary!) }
+            });
         if (card.Fields.Count > 0)
         {
             elements.Add(new
