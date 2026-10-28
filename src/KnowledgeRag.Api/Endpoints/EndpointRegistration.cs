@@ -14,6 +14,7 @@ public static class EndpointRegistration
         app.MapSearchEndpoints();
         app.MapConversationEndpoints();
         app.MapDashboardEndpoints();
+        app.MapGovernanceEndpoints();
         app.MapHub<DocumentProcessingHub>("/hubs/documents");
         return app;
     }

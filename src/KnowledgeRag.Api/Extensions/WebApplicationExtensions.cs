@@ -13,6 +13,7 @@ public static class WebApplicationExtensions
         app.UseStaticFiles();
         app.UseAuthentication();
         app.UseAuthorization();
+        app.UseMiddleware<AuditLogMiddleware>();
         return app;
     }
 }

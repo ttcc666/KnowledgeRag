@@ -15,6 +15,7 @@ import {
   Moon,
   Search,
   Settings2,
+  ShieldCheck,
   Sun,
   Workflow,
   X,
@@ -42,6 +43,7 @@ const sections = [
     items: [
       { to: '/ingestion', label: '摄取任务', icon: Activity },
       { to: '/pipeline', label: 'RAG Pipeline', icon: Workflow },
+      { to: '/governance', label: 'AI 治理中心', icon: ShieldCheck },
     ],
   },
   {
@@ -113,6 +115,7 @@ export function AppShell() {
     if (pathname === '/chat') return 'Conversations'
     if (pathname === '/ingestion') return 'Ingestion Operations'
     if (pathname === '/pipeline') return 'RAG Pipeline'
+    if (pathname === '/governance') return 'AI Governance'
     if (pathname === '/tenants') return 'Team & Access'
     if (pathname === '/settings') return 'Settings'
     return 'Overview'

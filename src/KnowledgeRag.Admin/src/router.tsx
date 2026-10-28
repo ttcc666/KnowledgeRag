@@ -23,6 +23,7 @@ const TenantsPage = lazyPage(() => import('@/features/tenants/tenants-page'), 'T
 const ChatPage = lazyPage(() => import('@/features/chat/chat-page'), 'ChatPage')
 const IngestionPage = lazyPage(() => import('@/features/operations/ingestion-page'), 'IngestionPage')
 const PipelinePage = lazyPage(() => import('@/features/operations/pipeline-page'), 'PipelinePage')
+const GovernancePage = lazyPage(() => import('@/features/governance/governance-page'), 'GovernancePage')
 const SettingsPage = lazyPage(() => import('@/features/settings/settings-page'), 'SettingsPage')
 
 const rootRoute = createRootRoute({ component: () => <Outlet /> })
@@ -38,6 +39,7 @@ const routes = [
   createRoute({ getParentRoute: () => authenticatedRoute, path: '/chat', component: ChatPage }),
   createRoute({ getParentRoute: () => authenticatedRoute, path: '/ingestion', component: IngestionPage }),
   createRoute({ getParentRoute: () => authenticatedRoute, path: '/pipeline', component: PipelinePage }),
+  createRoute({ getParentRoute: () => authenticatedRoute, path: '/governance', component: GovernancePage }),
   createRoute({ getParentRoute: () => authenticatedRoute, path: '/tenants', component: TenantsPage }),
   createRoute({ getParentRoute: () => authenticatedRoute, path: '/settings', component: SettingsPage }),
 ]

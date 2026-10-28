@@ -36,3 +36,33 @@ export interface IngestionJobSummary { documentId: string; knowledgeBaseId: stri
 export interface RetrievalMetricsSummary { queryCount: number; p50LatencyMs: number; p95LatencyMs: number; noResultRate: number; averageTopScore: number; averageRerankScore: number; estimatedInputTokens: number; estimatedOutputTokens: number; estimatedModelCostUsd?: number | null; chatTurns: number }
 export interface DashboardSummary { knowledgeBaseCount: number; readyDocumentCount: number; processingDocumentCount: number; failedDocumentCount: number; cancelledDocumentCount: number; totalChunkCount: number; conversationCount: number; activity: DailyActivityPoint[]; recentIngestion: IngestionJobSummary[]; retrieval: RetrievalMetricsSummary }
 export interface ProductSettingsSummary { databaseProvider: string; chatModel: string; embeddingModel: string; vectorBackend: string; lexicalBackend: string; rerankerMode: string; storageProvider: string; capTransport: string; capFailedRetryCount: number; chunkSize: number; chunkOverlap: number; topK: number; maxUploadMegabytes: number; openTelemetryEnabled: boolean }
+
+export interface GovernanceOverview { runCount: number; averageLatencyMs: number; estimatedCostUsd: number; auditCount: number; promptProfileCount: number; activeWebhookCount: number; evaluationRunCount: number }
+export interface RagProfile {
+  knowledgeBaseId: string
+  enablePlanner: boolean
+  plannerMaxQueries: number
+  multiQueryTopK: number
+  maxMergedEvidence: number
+  enableReviewer: boolean
+  reviewerMaxRetries: number
+  reviewerMinConfidence: number
+  plannerModel: string
+  answerModel: string
+  reviewerModel: string
+  promptProfileId?: string | null
+  agentMode: string
+  monthlyBudgetUsd: number
+  dailyRunLimit: number
+  updatedByUserId: string
+  updatedAt: string
+}
+export type RagProfileUpdate = Omit<RagProfile, 'knowledgeBaseId' | 'updatedByUserId' | 'updatedAt'>
+export interface RagRun { id: string; tenantId: string; knowledgeBaseId: string; conversationId?: string | null; userId: string; apiKeyId?: string | null; query: string; answer: string; status: string; answerModel: string; agentMode: string; sourceCount: number; estimatedInputTokens: number; estimatedOutputTokens: number; estimatedCostUsd: number; latencyMs: number; traceJson: string; createdAt: string }
+export interface ModelPrice { id: string; tenantId: string; model: string; inputCostPerMillionTokens: number; outputCostPerMillionTokens: number; isActive: boolean; updatedAt: string }
+export interface AuditLog { id: string; tenantId?: string | null; userId: string; apiKeyId?: string | null; action: string; resourceType: string; resourceId?: string | null; summary: string; detailsJson?: string | null; ipAddress?: string | null; userAgent?: string | null; statusCode: number; createdAt: string }
+export interface PromptProfile { id: string; tenantId: string; knowledgeBaseId?: string | null; name: string; version: number; plannerPrompt: string; answerPrompt: string; reviewerPrompt: string; isActive: boolean; updatedByUserId: string; createdAt: string; updatedAt: string }
+export interface WebhookSubscription { id: string; tenantId: string; name: string; url: string; eventTypes: string; isActive: boolean; lastStatusCode?: number | null; lastError?: string | null; lastDeliveredAt?: string | null; createdByUserId: string; createdAt: string; updatedAt: string }
+export interface EvaluationDataset { id: string; tenantId: string; knowledgeBaseId: string; name: string; description?: string | null; createdByUserId: string; createdAt: string; updatedAt: string }
+export interface EvaluationCase { id: string; datasetId: string; category: string; query: string; expectedAnswerContains?: string | null; requiresKnowledge: boolean; createdAt: string }
+export interface EvaluationRun { id: string; datasetId: string; knowledgeBaseId: string; status: string; caseCount: number; passedCount: number; passRate: number; groundednessRate: number; averageLatencyMs: number; averageSourceCount: number; resultsJson: string; createdByUserId: string; createdAt: string; completedAt?: string | null }
