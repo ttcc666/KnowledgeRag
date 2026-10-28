@@ -14,7 +14,7 @@ public sealed class ConversationService(
     AppDbContext db,
     KnowledgeBaseAccessService access,
     RagAgentService agent,
-    GovernanceService governance,
+    RagRunAccountingService accounting,
     RagRuntimeProfileService runtimeProfiles,
     WebhookAutomationService webhooks)
 {
@@ -82,12 +82,15 @@ public sealed class ConversationService(
         var timer = Stopwatch.StartNew();
         var trace = new ConcurrentQueue<object>();
         ConversationEntity? conversation = null;
+        ResolvedRagProfile? profile = null;
+        RagRunEntity? reservation = null;
+        var settled = false;
         try
         {
             conversation = await GetOwnedConversationAsync(actor, conversationId, cancellationToken);
             await access.RequireAsync(actor, conversation.KnowledgeBaseId, KnowledgeBaseRole.Viewer, cancellationToken);
-            var profile = await runtimeProfiles.ResolveAsync(conversation.KnowledgeBaseId, cancellationToken);
-            await EnforceBudgetAsync(actor, conversation.KnowledgeBaseId, profile, cancellationToken);
+            profile = await runtimeProfiles.ResolveAsync(conversation.KnowledgeBaseId, cancellationToken);
+            reservation = await accounting.ReserveAsync(actor, conversation.KnowledgeBaseId, conversation.Id, message, profile, cancellationToken);
 
             async Task Progress(RagProgressEvent progress, CancellationToken token)
             {
@@ -121,8 +124,9 @@ public sealed class ConversationService(
             await db.SaveChangesAsync(cancellationToken);
 
             timer.Stop();
-            var run = await governance.RecordRunAsync(actor, conversation.KnowledgeBaseId, conversation.Id, message, citations.Answer, sources.Count,
-                profile.AnswerModel, profile.AgentMode, timer.ElapsedMilliseconds, trace.ToArray(), "completed", cancellationToken);
+            var run = await accounting.SettleAsync(reservation.Id, profile, message, citations.Answer, sources.Count,
+                timer.ElapsedMilliseconds, trace.ToArray(), "completed", cancellationToken);
+            settled = true;
             await webhooks.DispatchAsync(run.TenantId, "rag.run.completed", new
             {
                 run.Id, run.KnowledgeBaseId, run.ConversationId, run.Status, run.SourceCount, run.LatencyMs,
@@ -132,48 +136,19 @@ public sealed class ConversationService(
         }
         catch (OperationCanceledException)
         {
-            if (conversation is not null)
-            {
-                var profile = await runtimeProfiles.ResolveAsync(conversation.KnowledgeBaseId, CancellationToken.None);
-                await governance.RecordRunAsync(actor, conversation.KnowledgeBaseId, conversation.Id, message, string.Empty, 0,
-                    profile.AnswerModel, profile.AgentMode, timer.ElapsedMilliseconds, trace.ToArray(), "cancelled", CancellationToken.None);
-            }
+            if (!settled && reservation is not null && profile is not null)
+                await accounting.SettleAsync(reservation.Id, profile, message, string.Empty, 0,
+                    timer.ElapsedMilliseconds, trace.ToArray(), "cancelled", CancellationToken.None);
             throw;
         }
         catch
         {
-            if (conversation is not null)
-            {
-                var profile = await runtimeProfiles.ResolveAsync(conversation.KnowledgeBaseId, CancellationToken.None);
-                await governance.RecordRunAsync(actor, conversation.KnowledgeBaseId, conversation.Id, message, string.Empty, 0,
-                    profile.AnswerModel, profile.AgentMode, timer.ElapsedMilliseconds, trace.ToArray(), "failed", CancellationToken.None);
-            }
+            if (!settled && reservation is not null && profile is not null)
+                await accounting.SettleAsync(reservation.Id, profile, message, string.Empty, 0,
+                    timer.ElapsedMilliseconds, trace.ToArray(), "failed", CancellationToken.None);
             throw;
         }
         finally { gate.Release(); }
-    }
-
-    private async Task EnforceBudgetAsync(ActorContext actor, Guid knowledgeBaseId, ResolvedRagProfile profile, CancellationToken ct)
-    {
-        if (profile.DailyRunLimit <= 0 && profile.MonthlyBudgetUsd <= 0) return;
-        var tenantId = await governance.ResolveTenantIdAsync(knowledgeBaseId, ct);
-        var runs = await db.Set<RagRunEntity>().AsNoTracking()
-            .Where(x => x.KnowledgeBaseId == knowledgeBaseId && x.TenantId == tenantId && x.Status == "completed")
-            .Select(x => new { x.CreatedAt, x.EstimatedCostUsd })
-            .ToListAsync(ct);
-        if (profile.DailyRunLimit > 0)
-        {
-            var start = new DateTimeOffset(DateTime.UtcNow.Date, TimeSpan.Zero);
-            var today = runs.Count(x => x.CreatedAt >= start);
-            if (today >= profile.DailyRunLimit) throw new InvalidOperationException("该知识库已达到今日 RAG Run 配额。");
-        }
-        if (profile.MonthlyBudgetUsd > 0)
-        {
-            var now = DateTimeOffset.UtcNow;
-            var start = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
-            var spend = runs.Where(x => x.CreatedAt >= start).Sum(x => x.EstimatedCostUsd);
-            if (spend >= profile.MonthlyBudgetUsd) throw new InvalidOperationException("该知识库已达到本月 AI 成本预算。");
-        }
     }
 
     public async Task DeleteAsync(ActorContext actor, Guid conversationId, CancellationToken cancellationToken = default)
