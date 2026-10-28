@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -46,20 +47,204 @@ public static class WebhookChannelAdapterRegistry
 public static class WebhookChannelMessageFormatter
 {
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
-    private static readonly JsonSerializerOptions PrettyJson = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
     public static (string EnvelopeJson, string Message) Format(WebhookDeliveryRequested delivery)
     {
         using var payloadDocument = JsonDocument.Parse(delivery.PayloadJson);
+        var payload = payloadDocument.RootElement;
         var envelopeJson = JsonSerializer.Serialize(new
         {
             id = delivery.EventId, type = delivery.EventType, createdAt = delivery.CreatedAt,
-            data = payloadDocument.RootElement.Clone()
+            data = payload.Clone()
         }, WebJson);
-        var details = JsonSerializer.Serialize(payloadDocument.RootElement, PrettyJson);
-        var message = $"KnowledgeRag 通知 · {delivery.EventType}\n事件 ID：{delivery.EventId:D}\n时间：{delivery.CreatedAt:O}\n\n{details}";
+
+        var message = delivery.EventType.ToLowerInvariant() switch
+        {
+            "webhook.test" => FormatTest(delivery, payload),
+            "rag.run.completed" => FormatRagRunCompleted(delivery, payload),
+            "evaluation.completed" => FormatEvaluationCompleted(delivery, payload),
+            _ => FormatGeneric(delivery, payload)
+        };
         return (envelopeJson, message);
     }
+
+    private static string FormatTest(WebhookDeliveryRequested delivery, JsonElement payload)
+    {
+        var configuredMessage = ReadString(payload, "message");
+        var lines = new List<string>
+        {
+            "✅ KnowledgeRag 通知测试",
+            string.IsNullOrWhiteSpace(configuredMessage) ? "消息通道配置已生效，可以正常接收 KnowledgeRag 通知。" : configuredMessage,
+            $"时间：{FormatTime(delivery.CreatedAt)}",
+            $"Delivery ID：{ShortId(delivery.EventId)}"
+        };
+        return string.Join("\n", lines);
+    }
+
+    private static string FormatRagRunCompleted(WebhookDeliveryRequested delivery, JsonElement payload)
+    {
+        var status = ReadString(payload, "status") ?? "completed";
+        var runId = ReadString(payload, "id");
+        var sourceCount = ReadInt64(payload, "sourceCount");
+        var latencyMs = ReadDouble(payload, "latencyMs");
+        var inputTokens = ReadInt64(payload, "estimatedInputTokens");
+        var outputTokens = ReadInt64(payload, "estimatedOutputTokens");
+        var cost = ReadDecimal(payload, "estimatedCostUsd");
+        var model = ReadString(payload, "answerModel");
+        var agentMode = ReadString(payload, "agentMode");
+
+        var lines = new List<string>
+        {
+            status.Equals("completed", StringComparison.OrdinalIgnoreCase)
+                ? "✅ KnowledgeRag · RAG 运行完成"
+                : $"ℹ️ KnowledgeRag · RAG 运行 {status}",
+            $"状态：{DisplayStatus(status)}"
+        };
+        if (sourceCount.HasValue) lines.Add($"引用来源：{sourceCount.Value:N0} 个");
+        if (latencyMs.HasValue) lines.Add($"耗时：{FormatDuration(latencyMs.Value)}");
+        if (inputTokens.HasValue || outputTokens.HasValue)
+            lines.Add($"Token：{FormatCount(inputTokens)} 输入 / {FormatCount(outputTokens)} 输出");
+        if (cost.HasValue) lines.Add($"估算成本：${cost.Value.ToString("0.######", CultureInfo.InvariantCulture)}");
+        if (!string.IsNullOrWhiteSpace(model)) lines.Add($"回答模型：{model}");
+        if (!string.IsNullOrWhiteSpace(agentMode)) lines.Add($"Agent 模式：{agentMode}");
+        if (!string.IsNullOrWhiteSpace(runId)) lines.Add($"Run ID：{ShortId(runId)}");
+        lines.Add($"时间：{FormatTime(delivery.CreatedAt)}");
+        return string.Join("\n", lines);
+    }
+
+    private static string FormatEvaluationCompleted(WebhookDeliveryRequested delivery, JsonElement payload)
+    {
+        var passRate = ReadDouble(payload, "passRate");
+        var groundednessRate = ReadDouble(payload, "groundednessRate");
+        var citationValidityRate = ReadDouble(payload, "citationValidityRate");
+        var noAnswerAccuracy = ReadDouble(payload, "noAnswerAccuracy");
+        var latencyMs = ReadDouble(payload, "averageLatencyMs");
+        var runId = ReadString(payload, "id");
+        var passRateRegression = ReadBoolean(payload, "passRateRegression");
+        var groundednessRegression = ReadBoolean(payload, "groundednessRegression");
+        var latencyRegression = ReadBoolean(payload, "latencyRegression");
+
+        var hasRegression = passRateRegression == true || groundednessRegression == true || latencyRegression == true;
+        var lines = new List<string>
+        {
+            hasRegression ? "⚠️ KnowledgeRag · Evaluation 完成（检测到回归）" : "✅ KnowledgeRag · Evaluation 完成"
+        };
+        if (passRate.HasValue) lines.Add($"通过率：{FormatPercent(passRate.Value)}");
+        if (groundednessRate.HasValue) lines.Add($"Groundedness：{FormatPercent(groundednessRate.Value)}");
+        if (citationValidityRate.HasValue) lines.Add($"Citation validity：{FormatPercent(citationValidityRate.Value)}");
+        if (noAnswerAccuracy.HasValue) lines.Add($"No-answer accuracy：{FormatPercent(noAnswerAccuracy.Value)}");
+        if (latencyMs.HasValue) lines.Add($"平均耗时：{FormatDuration(latencyMs.Value)}");
+        if (hasRegression)
+        {
+            var regressions = new List<string>();
+            if (passRateRegression == true) regressions.Add("通过率");
+            if (groundednessRegression == true) regressions.Add("Groundedness");
+            if (latencyRegression == true) regressions.Add("延迟");
+            lines.Add($"回归项：{string.Join("、", regressions)}");
+        }
+        if (!string.IsNullOrWhiteSpace(runId)) lines.Add($"Run ID：{ShortId(runId)}");
+        lines.Add($"时间：{FormatTime(delivery.CreatedAt)}");
+        return string.Join("\n", lines);
+    }
+
+    private static string FormatGeneric(WebhookDeliveryRequested delivery, JsonElement payload)
+    {
+        var lines = new List<string>
+        {
+            $"🔔 KnowledgeRag · {delivery.EventType}",
+            $"时间：{FormatTime(delivery.CreatedAt)}"
+        };
+
+        if (payload.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in payload.EnumerateObject())
+            {
+                if (lines.Count >= 10) break;
+                var value = FormatPrimitive(property.Value);
+                if (!string.IsNullOrWhiteSpace(value)) lines.Add($"{Humanize(property.Name)}：{value}");
+            }
+        }
+        return string.Join("\n", lines);
+    }
+
+    private static string? ReadString(JsonElement payload, string propertyName)
+    {
+        if (!payload.TryGetProperty(propertyName, out var value)) return null;
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => value.ToString(),
+            _ => null
+        };
+    }
+
+    private static long? ReadInt64(JsonElement payload, string propertyName)
+        => payload.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var result)
+            ? result
+            : null;
+
+    private static double? ReadDouble(JsonElement payload, string propertyName)
+        => payload.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var result)
+            ? result
+            : null;
+
+    private static decimal? ReadDecimal(JsonElement payload, string propertyName)
+        => payload.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var result)
+            ? result
+            : null;
+
+    private static bool? ReadBoolean(JsonElement payload, string propertyName)
+        => payload.TryGetProperty(propertyName, out var value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? value.GetBoolean()
+            : null;
+
+    private static string? FormatPrimitive(JsonElement value)
+        => value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => value.ToString(),
+            _ => null
+        };
+
+    private static string Humanize(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "详情";
+        var builder = new StringBuilder(name.Length + 8);
+        for (var i = 0; i < name.Length; i++)
+        {
+            var ch = name[i];
+            if (i > 0 && char.IsUpper(ch) && !char.IsUpper(name[i - 1])) builder.Append(' ');
+            builder.Append(ch);
+        }
+        return builder.ToString();
+    }
+
+    private static string DisplayStatus(string status)
+        => status.ToLowerInvariant() switch
+        {
+            "completed" => "已完成",
+            "failed" => "失败",
+            "cancelled" => "已取消",
+            "running" => "运行中",
+            _ => status
+        };
+
+    private static string FormatCount(long? value)
+        => value.HasValue ? value.Value.ToString("N0", CultureInfo.InvariantCulture) : "—";
+
+    private static string FormatDuration(double milliseconds)
+        => milliseconds >= 1000
+            ? $"{(milliseconds / 1000d).ToString("0.0", CultureInfo.InvariantCulture)} 秒"
+            : $"{milliseconds.ToString("0", CultureInfo.InvariantCulture)} 毫秒";
+
+    private static string FormatPercent(double value)
+        => $"{(value * 100d).ToString("0.0", CultureInfo.InvariantCulture)}%";
+
+    private static string FormatTime(DateTimeOffset value)
+        => value.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture);
+
+    private static string ShortId(Guid value) => value.ToString("D")[..8];
+    private static string ShortId(string value) => value.Length <= 8 ? value : value[..8];
 }
 
 internal static class WebhookChannelAdapterHelpers
@@ -171,7 +356,7 @@ internal sealed class FeishuWebhookChannelAdapter : IWebhookChannelAdapter
         };
         if (!string.IsNullOrWhiteSpace(secret))
         {
-            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture);
             payload["timestamp"] = timestamp;
             payload["sign"] = WebhookChannelAdapterHelpers.SignFeishu(timestamp, secret);
         }
@@ -190,7 +375,7 @@ internal sealed class DingTalkWebhookChannelAdapter : IWebhookChannelAdapter
         var target = destination;
         if (!string.IsNullOrWhiteSpace(secret))
         {
-            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture);
             var sign = WebhookChannelAdapterHelpers.SignDingTalk(timestamp, secret);
             var builder = new UriBuilder(destination);
             var existingQuery = builder.Query.TrimStart('?');
