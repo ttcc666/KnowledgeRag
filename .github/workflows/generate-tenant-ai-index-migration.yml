@@ -1,0 +1,38 @@
+name: generate-tenant-ai-index-migration
+
+on:
+  push:
+    branches:
+      - feat/tenant-ai-embedding-index-generations
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Install EF Core CLI
+        run: dotnet tool install --global dotnet-ef --version 10.0.14
+      - name: Restore
+        run: dotnet restore KnowledgeRag.NonAzure.sln
+      - name: Generate migration with dotnet ef
+        env:
+          Database__AutoMigrate: 'false'
+        run: dotnet ef migrations add TenantAiEmbeddingIndexGenerations --project src/KnowledgeRag.Infrastructure/KnowledgeRag.Infrastructure.csproj --startup-project src/KnowledgeRag.Api/KnowledgeRag.Api.csproj --context AppDbContext --output-dir Persistence/Migrations
+      - name: Commit generated migration and remove temporary workflow
+        env:
+          BRANCH: feat/tenant-ai-embedding-index-generations
+        run: |
+          set -euo pipefail
+          rm .github/workflows/generate-tenant-ai-index-migration.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/KnowledgeRag.Infrastructure/Persistence/Migrations/*.cs .github/workflows/generate-tenant-ai-index-migration.yml
+          git commit -m "chore(db): generate tenant AI index generation migration"
+          git push origin "HEAD:$BRANCH"

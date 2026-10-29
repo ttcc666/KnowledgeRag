@@ -14,6 +14,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<RefreshTokenEntity> RefreshTokens => Set<RefreshTokenEntity>();
     public DbSet<ApiKeyEntity> ApiKeys => Set<ApiKeyEntity>();
     public DbSet<KnowledgeBaseEntity> KnowledgeBases => Set<KnowledgeBaseEntity>();
+    public DbSet<KnowledgeBaseIndexGenerationEntity> KnowledgeBaseIndexGenerations => Set<KnowledgeBaseIndexGenerationEntity>();
+    public DbSet<KnowledgeBaseIndexGenerationDocumentEntity> KnowledgeBaseIndexGenerationDocuments => Set<KnowledgeBaseIndexGenerationDocumentEntity>();
     public DbSet<KnowledgeBaseMemberEntity> KnowledgeBaseMembers => Set<KnowledgeBaseMemberEntity>();
     public DbSet<DocumentEntity> Documents => Set<DocumentEntity>();
     public DbSet<DocumentChunkEntity> DocumentChunks => Set<DocumentChunkEntity>();
@@ -133,6 +135,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         {
             entity.ToTable("KnowledgeBases");
             entity.HasKey(x => x.Id);
+            entity.Property(x => x.ActiveIndexGenerationId).HasDefaultValue(Guid.Empty);
             entity.Property(x => x.Name).HasMaxLength(200);
             entity.Property(x => x.Description).HasMaxLength(2000);
             entity.HasIndex(x => new { x.TenantId, x.UpdatedAt });
@@ -170,8 +173,40 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.ToTable("DocumentChunks");
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Text).IsRequired();
-            entity.HasIndex(x => new { x.KnowledgeBaseId, x.DocumentId });
-            entity.HasIndex(x => new { x.DocumentId, x.ChunkIndex }).IsUnique();
+            entity.Property(x => x.IndexGenerationId).HasDefaultValue(Guid.Empty);
+            entity.HasIndex(x => new { x.KnowledgeBaseId, x.DocumentId, x.IndexGenerationId });
+            entity.HasIndex(x => new { x.DocumentId, x.IndexGenerationId, x.ChunkIndex }).IsUnique();
+            entity.HasOne<DocumentEntity>().WithMany().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<KnowledgeBaseIndexGenerationEntity>(entity =>
+        {
+            entity.ToTable("KnowledgeBaseIndexGenerations");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.DeploymentDisplayName).HasMaxLength(200);
+            entity.Property(x => x.ProviderType).HasMaxLength(64);
+            entity.Property(x => x.BaseUrl).HasMaxLength(2000);
+            entity.Property(x => x.ModelName).HasMaxLength(200);
+            entity.Property(x => x.Status).HasMaxLength(32);
+            entity.Property(x => x.ManifestHash).HasMaxLength(64);
+            entity.Property(x => x.FailureReason).HasMaxLength(2000);
+            entity.HasIndex(x => new { x.KnowledgeBaseId, x.CreatedAt });
+            entity.HasIndex(x => new { x.KnowledgeBaseId, x.Status });
+            entity.HasOne<KnowledgeBaseEntity>().WithMany().HasForeignKey(x => x.KnowledgeBaseId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<TenantEntity>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<AiProviderConnectionEntity>().WithMany().HasForeignKey(x => x.ProviderConnectionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<UserEntity>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<KnowledgeBaseIndexGenerationDocumentEntity>(entity =>
+        {
+            entity.ToTable("KnowledgeBaseIndexGenerationDocuments");
+            entity.HasKey(x => new { x.IndexGenerationId, x.DocumentId });
+            entity.Property(x => x.SourceSha256).HasMaxLength(64);
+            entity.Property(x => x.Status).HasMaxLength(32);
+            entity.Property(x => x.Error).HasMaxLength(2000);
+            entity.HasIndex(x => new { x.IndexGenerationId, x.Status });
+            entity.HasOne<KnowledgeBaseIndexGenerationEntity>().WithMany().HasForeignKey(x => x.IndexGenerationId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne<DocumentEntity>().WithMany().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Cascade);
         });
 
