@@ -1,3 +1,5 @@
+using KnowledgeRag.Domain.Entities;
+using KnowledgeRag.Infrastructure.AI;
 using KnowledgeRag.Infrastructure.Configuration;
 using KnowledgeRag.Infrastructure.Conversations;
 
@@ -9,7 +11,9 @@ public sealed record AiUsageEstimate(
     int Calls,
     int InputTokens,
     int OutputTokens,
-    bool Estimated = true);
+    bool Estimated = true,
+    Guid? DeploymentId = null,
+    string? ProviderType = null);
 
 public sealed record AiUsageLineItem(
     string Operation,
@@ -18,7 +22,9 @@ public sealed record AiUsageLineItem(
     int InputTokens,
     int OutputTokens,
     decimal CostUsd,
-    bool Estimated = true);
+    bool Estimated = true,
+    Guid? DeploymentId = null,
+    string? ProviderType = null);
 
 public sealed record RagBudgetSnapshot(DateTimeOffset CreatedAt, string Status, decimal CostUsd);
 
@@ -67,38 +73,43 @@ public static class AiUsageEstimator
         var queryCalls = retrievalRounds * queriesPerRound;
 
         if (profile.EnablePlanner)
-            result.Add(new AiUsageEstimate("planner", profile.PlannerModel, 1, queryTokens + 192, 192));
+            result.Add(ForEndpoint("planner", profile.PlannerEndpoint, 1, queryTokens + 192, 192));
 
-        result.Add(new AiUsageEstimate(
-            "embedding",
-            ai.EmbeddingModel,
-            queryCalls,
-            queryCalls * Math.Max(32, queryTokens + 32),
-            0));
+        var embeddingEndpoint = profile.EmbeddingEndpoint?.Endpoint;
+        result.Add(embeddingEndpoint is not null
+            ? ForEndpoint("embedding", embeddingEndpoint, queryCalls, queryCalls * Math.Max(32, queryTokens + 32), 0)
+            : new AiUsageEstimate("embedding", ai.EmbeddingModel, queryCalls,
+                queryCalls * Math.Max(32, queryTokens + 32), 0, DeploymentId: null, ProviderType: AiProviderTypes.OpenAiCompatible));
 
         if (string.Equals(reranker.Mode, "llm", StringComparison.OrdinalIgnoreCase))
         {
-            var rerankModel = string.IsNullOrWhiteSpace(reranker.Model) ? ai.ChatModel : reranker.Model;
             var rerankCalls = queryCalls + retrievalRounds;
             var candidateTokens = Math.Max(1, reranker.CandidateCount) * Math.Max(64, reranker.MaxDocumentCharacters / 4);
-            result.Add(new AiUsageEstimate("reranker", rerankModel, rerankCalls,
-                rerankCalls * (queryTokens + candidateTokens),
-                rerankCalls * Math.Max(64, reranker.CandidateCount * 12)));
+            if (profile.RerankerEndpoint is { } routedReranker)
+                result.Add(ForEndpoint("reranker", routedReranker, rerankCalls,
+                    rerankCalls * (queryTokens + candidateTokens), rerankCalls * Math.Max(64, reranker.CandidateCount * 12)));
+            else
+            {
+                var rerankModel = string.IsNullOrWhiteSpace(reranker.Model) ? ai.ChatModel : reranker.Model;
+                result.Add(new AiUsageEstimate("reranker", rerankModel, rerankCalls,
+                    rerankCalls * (queryTokens + candidateTokens), rerankCalls * Math.Max(64, reranker.CandidateCount * 12),
+                    DeploymentId: null, ProviderType: AiProviderTypes.OpenAiCompatible));
+            }
         }
 
         var answerCalls = 1 + (profile.EnableReviewer ? profile.ReviewerMaxRetries : 0);
-        result.Add(new AiUsageEstimate("answer", profile.AnswerModel, answerCalls,
+        result.Add(ForEndpoint("answer", profile.AnswerEndpoint, answerCalls,
             answerCalls * (queryTokens + evidenceTokens + 256), answerCalls * 1200));
 
         if (profile.EnableReviewer)
         {
             var reviewCalls = profile.ReviewerMaxRetries + 1;
-            result.Add(new AiUsageEstimate("reviewer", profile.ReviewerModel, reviewCalls,
+            result.Add(ForEndpoint("reviewer", profile.ReviewerEndpoint, reviewCalls,
                 reviewCalls * (queryTokens + evidenceTokens + 1200), reviewCalls * 320));
         }
 
         if (!string.Equals(profile.AgentMode, "single", StringComparison.OrdinalIgnoreCase))
-            result.Add(new AiUsageEstimate("specialist", profile.ReviewerModel, 1,
+            result.Add(ForEndpoint("specialist", profile.ReviewerEndpoint, 1,
                 queryTokens + evidenceTokens + 256, 640));
 
         return result;
@@ -124,7 +135,7 @@ public static class AiUsageEstimator
 
         var plannerCalls = CountStarted(events, "QueryPlannerAgent", "agent.started");
         if (plannerCalls > 0)
-            result.Add(new AiUsageEstimate("planner", profile.PlannerModel, plannerCalls,
+            result.Add(ForEndpoint("planner", profile.PlannerEndpoint, plannerCalls,
                 plannerCalls * (queryTokens + 192), plannerCalls * 192));
 
         var queryEvents = events.Where(x =>
@@ -132,7 +143,13 @@ public static class AiUsageEstimator
             string.Equals(x.Type, "query.running", StringComparison.OrdinalIgnoreCase)).ToArray();
         var queryInputTokens = queryEvents.Sum(x => Math.Max(1, EstimateTokens(ReadString(x.Data, "query") ?? query)));
         if (queryEvents.Length > 0)
-            result.Add(new AiUsageEstimate("embedding", ai.EmbeddingModel, queryEvents.Length, queryInputTokens, 0));
+        {
+            var embeddingEndpoint = profile.EmbeddingEndpoint?.Endpoint;
+            result.Add(embeddingEndpoint is not null
+                ? ForEndpoint("embedding", embeddingEndpoint, queryEvents.Length, queryInputTokens, 0)
+                : new AiUsageEstimate("embedding", ai.EmbeddingModel, queryEvents.Length, queryInputTokens, 0,
+                    DeploymentId: null, ProviderType: AiProviderTypes.OpenAiCompatible));
+        }
 
         if (string.Equals(reranker.Mode, "llm", StringComparison.OrdinalIgnoreCase))
         {
@@ -143,10 +160,17 @@ public static class AiUsageEstimator
             var rerankCalls = completedQueries + completedRounds;
             if (rerankCalls > 0)
             {
-                var rerankModel = string.IsNullOrWhiteSpace(reranker.Model) ? ai.ChatModel : reranker.Model;
                 var candidateTokens = Math.Max(1, reranker.CandidateCount) * Math.Max(64, reranker.MaxDocumentCharacters / 4);
-                result.Add(new AiUsageEstimate("reranker", rerankModel, rerankCalls,
-                    rerankCalls * (queryTokens + candidateTokens), rerankCalls * Math.Max(64, reranker.CandidateCount * 12)));
+                if (profile.RerankerEndpoint is { } routedReranker)
+                    result.Add(ForEndpoint("reranker", routedReranker, rerankCalls,
+                        rerankCalls * (queryTokens + candidateTokens), rerankCalls * Math.Max(64, reranker.CandidateCount * 12)));
+                else
+                {
+                    var rerankModel = string.IsNullOrWhiteSpace(reranker.Model) ? ai.ChatModel : reranker.Model;
+                    result.Add(new AiUsageEstimate("reranker", rerankModel, rerankCalls,
+                        rerankCalls * (queryTokens + candidateTokens), rerankCalls * Math.Max(64, reranker.CandidateCount * 12),
+                        DeploymentId: null, ProviderType: AiProviderTypes.OpenAiCompatible));
+                }
             }
         }
 
@@ -154,26 +178,22 @@ public static class AiUsageEstimator
         if (answerCalls > 0)
         {
             var finalOutput = Math.Max(1, EstimateTokens(answer));
-            result.Add(new AiUsageEstimate("answer", profile.AnswerModel, answerCalls,
-                answerCalls * (queryTokens + evidenceTokens + 256),
-                answerCalls * finalOutput));
+            result.Add(ForEndpoint("answer", profile.AnswerEndpoint, answerCalls,
+                answerCalls * (queryTokens + evidenceTokens + 256), answerCalls * finalOutput));
         }
 
         var reviewerCalls = CountStarted(events, "EvidenceReviewerAgent", "agent.started");
         if (reviewerCalls > 0)
-            result.Add(new AiUsageEstimate("reviewer", profile.ReviewerModel, reviewerCalls,
-                reviewerCalls * (queryTokens + evidenceTokens + Math.Max(1, EstimateTokens(answer))),
-                reviewerCalls * 320));
+            result.Add(ForEndpoint("reviewer", profile.ReviewerEndpoint, reviewerCalls,
+                reviewerCalls * (queryTokens + evidenceTokens + Math.Max(1, EstimateTokens(answer))), reviewerCalls * 320));
 
         var specialistCalls = events.Count(x => string.Equals(x.Type, "tool.started", StringComparison.OrdinalIgnoreCase));
         if (specialistCalls > 0)
-            result.Add(new AiUsageEstimate("specialist", profile.ReviewerModel, specialistCalls,
+            result.Add(ForEndpoint("specialist", profile.ReviewerEndpoint, specialistCalls,
                 specialistCalls * (queryTokens + evidenceTokens + 256), specialistCalls * 640));
 
-        // Legacy mode and unusual provider behavior can omit progress events. Preserve a
-        // conservative answer estimate rather than recording a zero-cost completed run.
         if (result.All(x => x.Operation != "answer") && !string.IsNullOrWhiteSpace(answer))
-            result.Add(new AiUsageEstimate("answer", profile.AnswerModel, 1,
+            result.Add(ForEndpoint("answer", profile.AnswerEndpoint, 1,
                 queryTokens + evidenceTokens + 256, Math.Max(1, EstimateTokens(answer))));
 
         return result;
@@ -181,6 +201,14 @@ public static class AiUsageEstimator
 
     public static int EstimateTokens(string? value)
         => string.IsNullOrWhiteSpace(value) ? 0 : Math.Max(1, (int)Math.Ceiling(value.Length / 4d));
+
+    private static AiUsageEstimate ForEndpoint(
+        string operation,
+        ResolvedAiEndpoint endpoint,
+        int calls,
+        int inputTokens,
+        int outputTokens)
+        => new(operation, endpoint.Model, calls, inputTokens, outputTokens, true, endpoint.DeploymentId, endpoint.ProviderType);
 
     private static int CountStarted(IEnumerable<RagProgressEvent> events, string actor, string type)
         => events.Count(x => string.Equals(x.Actor, actor, StringComparison.Ordinal) &&
