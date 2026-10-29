@@ -214,3 +214,20 @@ The Chat renderer deliberately does not expose Chain of Thought. It renders only
 ## Specialist expansion
 
 The Answer Agent exposes stable evidence-analysis specialists as Agent-as-Tool functions for comparison, summarization, extraction, and research when the KB profile enables specialists. Add another specialist only when a stable task boundary appears. Do not add Group Chat, Handoff, or Magentic orchestration for ordinary RAG QA unless a new product requirement genuinely needs dynamic ownership or unconstrained collaboration.
+
+
+## Implementation source of truth
+
+When this guide needs an update, verify these current implementation and regression-test entry points first:
+
+- Workflow orchestration: `src/KnowledgeRag.Infrastructure/Conversations/RagAgentService.cs`
+- Deterministic plan normalization / retry policy: `src/KnowledgeRag.Infrastructure/Conversations/RagWorkflowPolicy.cs`
+- Evidence ID mapping and Citation contract: `src/KnowledgeRag.Infrastructure/Conversations/CitationContract.cs`
+- Final fail-closed answer validation: `src/KnowledgeRag.Infrastructure/Conversations/FinalAnswerPolicy.cs`
+- Multi-query retrieval / fusion: `src/KnowledgeRag.Infrastructure/Search/MultiQuerySearchService.cs`
+- Per-run profile, deployment routing and budget snapshot: `src/KnowledgeRag.Infrastructure/Governance/RagRuntimeProfileService.cs`
+- Evaluation execution and scoring: `src/KnowledgeRag.Infrastructure/Governance/EvaluationService.cs`
+- Conversation REST / SSE boundary: `src/KnowledgeRag.Api/Endpoints/ConversationEndpoints.cs`
+- Regression tests: `tests/KnowledgeRag.Api.IntegrationTests/FinalAnswerPolicyTests.cs`, `RagWorkflowPolicyTests.cs`, `EvaluationRetrievalScoringTests.cs`
+
+Related documentation: [system architecture](../ARCHITECTURE.md), [Tenant AI Provider configuration and model routing](AI_PROVIDER_CONFIGURATION.md), and [validation / CI](../VALIDATION.md).
