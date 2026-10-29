@@ -41,11 +41,28 @@ public sealed class KnowledgeBaseIndexGenerationService(
             ? null
             : await db.KnowledgeBaseIndexGenerations.AsNoTracking()
                 .SingleOrDefaultAsync(x => x.Id == knowledgeBase.ActiveIndexGenerationId, cancellationToken);
-        var latest = await db.KnowledgeBaseIndexGenerations.AsNoTracking()
-            .Where(x => x.KnowledgeBaseId == knowledgeBaseId)
-            .OrderByDescending(x => x.CreatedAt)
-            .ThenByDescending(x => x.Id)
-            .FirstOrDefaultAsync(cancellationToken);
+        KnowledgeBaseIndexGenerationEntity? latest;
+        if (db.Database.IsSqlite())
+        {
+            latest = await db.KnowledgeBaseIndexGenerations
+                .FromSqlInterpolated($"""
+                    SELECT *
+                    FROM "KnowledgeBaseIndexGenerations"
+                    WHERE "KnowledgeBaseId" = {knowledgeBaseId}
+                    ORDER BY julianday("CreatedAt") DESC, "Id" DESC
+                    LIMIT 1
+                    """)
+                .AsNoTracking()
+                .SingleOrDefaultAsync(cancellationToken);
+        }
+        else
+        {
+            latest = await db.KnowledgeBaseIndexGenerations.AsNoTracking()
+                .Where(x => x.KnowledgeBaseId == knowledgeBaseId)
+                .OrderByDescending(x => x.CreatedAt)
+                .ThenByDescending(x => x.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
 
         return new KnowledgeBaseIndexGenerationSummary(
             knowledgeBaseId,
