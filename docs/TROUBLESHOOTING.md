@@ -264,6 +264,8 @@ dotnet test tests/KnowledgeRag.Api.IntegrationTests/KnowledgeRag.Api.Integration
 5. 当前成本记录属于项目的估算与治理账本，不应默认等同于 Provider 最终账单。
 6. API 默认每个 API Key / 已认证用户 / 匿名 IP 每 60 秒允许 120 次请求；登录、注册和刷新令牌接口另默认限制每来源 IP 每 60 秒 10 次，且不超过全局上限。超限返回 429 并带 Retry-After。检查 RateLimiting:PermitLimit、RateLimiting:AuthPermitLimit 和 RateLimiting:WindowSeconds。该限流为单实例内存计数，多实例还需要 Gateway 限流。预算拒绝不是统一的 429 契约，部分业务错误仍可能返回 400。
 
+7. **Swagger UI 在非 Development 环境不可访问：** 这是默认安全行为。若确需排障，显式设置 `Swagger:Enabled=true`（Docker Compose 使用 `SWAGGER_ENABLED=true`），并限制网络访问；完成后关闭。
+
 **修复与验证**
 
 - 先核对当前 RAG Profile 与实际解析的 Deployment，再核对价格单位、输入 / 输出 token estimate 与运行状态。

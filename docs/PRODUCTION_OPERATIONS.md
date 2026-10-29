@@ -111,6 +111,7 @@ Production 启动会拒绝已知 SigningKey 占位值、缺失/过短的 MasterK
 - 登录、注册和刷新令牌端点默认进一步限制为每个来源 IP 每 60 秒 10 次；此上限不会高于全局 `RateLimiting:PermitLimit`。
 - Compose 部署可通过 `RATE_LIMITING_PERMIT_LIMIT`、`RATE_LIMITING_AUTH_PERMIT_LIMIT` 与 `RATE_LIMITING_WINDOW_SECONDS` 调整。
 - 限流器使用单实例内存计数；多副本部署必须在 Ingress / API Gateway 配置共享限流，不能把应用内限流当作分布式配额。
+- Swagger UI 在 Development 默认开放，其他环境默认关闭；如生产排障必须启用，设置 `SWAGGER_ENABLED=true`，并在网络层限制可访问来源，结束后恢复关闭。
 
 ### Storage
 

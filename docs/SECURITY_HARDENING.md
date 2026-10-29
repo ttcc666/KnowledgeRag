@@ -17,7 +17,7 @@
 | P1 | Audit Log 完整性 | AuditLogMiddleware 已移至 Authorization 之前，可记录已认证 actor 的授权拒绝和限流响应；匿名认证失败仍不会写入关联用户的 Audit Log，应结合反向代理与安全日志监控 |
 | P1 | Secret 轮换 | 新写入的 AI Credential 与 Webhook Secret 使用独立 SecretProtection MasterKey；previous master keys 与 legacy Auth keys 可在受控轮换期间解密旧密文。应用没有自动批量重加密命令，移除兼容密钥前必须重新保存并验证旧凭据 |
 | P1 | 上传与解析资源边界 | 已限制请求体 / 上传大小、提取文本字符数、PDF 页数与 DOCX part 字符数，并为 HTML 正则设置超时；恶意文件扫描、完整解析沙箱及所有 CPU / 内存边界仍未覆盖 |
-| P2 | TLS / CORS / Proxy | Production 已启用 HSTS；应用层 HTTPS 重定向可配置开启，CORS 使用精确 origin allowlist，Forwarded Headers 仅接受 loopback 或明确配置的可信代理。生产仍须由 ingress / reverse proxy 强制 HTTPS 并正确配置可信代理 |
+| P2 | TLS / CORS / Proxy / Swagger | Production 已启用 HSTS；应用层 HTTPS 重定向可配置开启，CORS 使用精确 origin allowlist，Forwarded Headers 仅接受 loopback 或明确配置的可信代理。Swagger 仅在 Development 默认开放，其他环境必须显式设置 Swagger:Enabled=true；生产开启时应再加网络访问控制 |
 | P2 | Trace / Audit 中的业务数据 | Chat / Run 会保存用户问题和答案；Timeline progress 可能包含检索 query。应按敏感业务数据管理访问、保留期和导出 |
 
 ## 2. Authentication、Authorization 与 RBAC
@@ -189,7 +189,7 @@ API pipeline 现已在配置的可信代理之后处理 Forwarded Headers；Prod
 - API 与 React UI 尽量使用同源部署；若必须跨域，配置明确的 Cors:AllowedOrigins allowlist，不使用任意 Origin + credentials 的组合。
 - 只信任 ForwardedHeaders:KnownProxies 中的代理 IP；默认不信任任意客户端提交的转发头。
 - 在 ingress 与应用两侧设置一致的 request size、连接超时、上游超时和并发限制。
-- 限制 Swagger 的生产可见性或仅允许受控网络访问。
+- Swagger 在 Development 默认开放；其他环境默认关闭。只有在受控网络确实需要时才设置 `Swagger:Enabled=true`（Compose: `SWAGGER_ENABLED=true`），并通过 ingress / VPN / allowlist 限制访问。
 - 对管理端点使用网络层访问控制，并持续验证认证和 RBAC，而不是依赖路径难以猜测。
 
 ## 10. 生产上线检查清单
