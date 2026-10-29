@@ -50,9 +50,9 @@
 1. [Production Operations](PRODUCTION_OPERATIONS.md)
 2. [Troubleshooting](TROUBLESHOOTING.md)
 3. [Security Hardening](SECURITY_HARDENING.md)
-2. [数据库迁移指南](../MIGRATION_GUIDE.md)
-3. [CAP + SignalR ingestion](../CAP_SIGNALR_INGESTION.md)
-4. [验证指南](../VALIDATION.md)
+4. [数据库迁移指南](../MIGRATION_GUIDE.md)
+5. [CAP + SignalR ingestion](../CAP_SIGNALR_INGESTION.md)
+6. [验证指南](../VALIDATION.md)
 
 ### Security / API reviewer
 
