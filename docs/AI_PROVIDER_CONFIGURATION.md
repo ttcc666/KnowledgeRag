@@ -923,3 +923,20 @@ Knowledge Base RAG Profile 与 Model Price API 由 Governance Center 使用；�
 ```
 
 如果需要高可用，再在 Chat / Rerank 上补充第二 Provider / Deployment，并配置显式 fallback；Embedding 高可用通过“明确切 target + 新 generation 重建”处理。
+
+
+## 20. 实现与回归测试入口
+
+本文后续维护应优先核对当前实现和测试：
+
+- Tenant Provider Connection / Deployment / defaults / health / fallback：`src/KnowledgeRag.Infrastructure/Tenancy/TenantAiProviderService.cs`
+- Credential 加密保护：`src/KnowledgeRag.Infrastructure/AI/AiCredentialProtector.cs`
+- RAG request snapshot、模型路由与 budget reservation：`src/KnowledgeRag.Infrastructure/Governance/RagRuntimeProfileService.cs`
+- Embedding generation / active pointer 切换：`src/KnowledgeRag.Infrastructure/Documents/KnowledgeBaseIndexGenerationService.cs`
+- Tenant AI Provider API：`src/KnowledgeRag.Api/Endpoints/TenantEndpoints.cs`
+- RAG Profile、pricing、audit、prompt、webhook、evaluation API：`src/KnowledgeRag.Api/Endpoints/GovernanceEndpoints.cs`
+- Provider API 回归：`tests/KnowledgeRag.Api.IntegrationTests/TenantAiProviderApiTests.cs`
+- Usage / pricing 回归：`tests/KnowledgeRag.Api.IntegrationTests/AiUsageAccountingTests.cs`
+- KB generation 回归：`tests/KnowledgeRag.Api.IntegrationTests/DocumentIndexVersionTests.cs`
+
+如路由、字段、fallback 语义、Embedding generation 生命周期或计费优先级发生变化，应同步修改本文与 [RAG Agent Workflow](RAG_AGENT_WORKFLOW.md)，并运行 [验证指南](../VALIDATION.md) 中对应的测试。

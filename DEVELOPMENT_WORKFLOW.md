@@ -71,7 +71,7 @@ dotnet test KnowledgeRag.NonAzure.sln -c Release --no-build
 
 除普通 .NET 测试外，还应执行 native backend smoke，或依赖 CI 中的 `native-backends-smoke`。
 
-### 2.4 更新 Changelog
+### 2.4 同步文档与 Changelog
 
 有用户可见、API、数据库、Agent、检索、安全、成本或运维变化时，在 `CHANGELOG.md` 的 `Unreleased` 中记录：
 
@@ -82,7 +82,16 @@ Fixed
 Security
 ```
 
-只改内部注释、纯格式化且没有行为变化时可以不记录。
+文档也必须随实现同步维护。开始修改文档前先核对最新 `main` 的代码、配置、测试与 CI；修改时至少检查：
+
+- API 路由和请求 / 响应契约是否仍存在；
+- 环境变量、Options 名称、Docker Compose profile 和默认值是否与实际绑定一致；
+- 目录 / 类 / migration 名称是否真实存在；
+- 测试命令和 CI 覆盖范围是否准确区分“实际运行”与“条件跳过”；
+- 跨文档的同一事实是否有唯一主说明，并通过链接引用；
+- 迁移 / fallback / reindex / security 等操作步骤是否描述了当前限制与失败语义。
+
+源码、配置、测试与 CI 是实现行为的最终依据。纯文档修正不需要在 `CHANGELOG.md` 中伪造运行时变更；如果本次实现行为发生变化，则文档和 Changelog 都要更新。
 
 ### 2.5 创建 Draft PR
 
@@ -542,6 +551,8 @@ Hotfix 的目标是缩小改动范围，而不是跳过完整合并前验证。
 - [ ] 有对应 regression test
 - [ ] 本地或 Draft CI 已通过
 - [ ] `CHANGELOG.md` 已更新（如适用）
+- [ ] README / 专项文档已与当前实现校准（如适用）
+- [ ] API、配置、migration、测试与 CI 相关描述已核对
 - [ ] PR 已转 Ready
 - [ ] Ready 后完整 CI 全绿
 - [ ] SQLite / PostgreSQL 兼容性已考虑

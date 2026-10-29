@@ -8,27 +8,23 @@
 
 ## 当前能力
 
-- Microsoft Agent Framework + `TextSearchProvider`
-- OpenAI-compatible Chat / Embeddings（OpenAI、Ollama、vLLM、兼容网关）
-- SQLite / PostgreSQL
-- EF Core Migration
-- JWT Access Token + 旋转式 Refresh Token
-- Tenant 多租户
-- Tenant `Owner / Admin / Member`
-- Knowledge Base `Owner / Editor / Viewer`
-- Tenant API Key，支持知识库范围与 `knowledge:read / write / admin`、`tenant:admin` scopes
-- Local / MinIO / AWS S3-compatible 文件存储
-- Qdrant / PostgreSQL pgvector 可选向量后端
-- C# BM25 / PostgreSQL 原生 FTS 可选词法后端
-- Hybrid Search：Vector + Lexical + RRF
-- `none / local / llm` reranker
-- Conversation / ChatMessage / AgentSession 持久化
-- OpenTelemetry traces + metrics + OTLP
-- xUnit + WebApplicationFactory 集成测试
-- PDF / DOCX / TXT / MD / CSV / JSON / XML / HTML
-- React 19 + Vite 8 + TypeScript + Tailwind CSS 4 + Shadcn/Radix 管理后台
-- TanStack Query / Router，自动 Refresh Token 重试
-- Swagger
+- **RAG Agent Workflow**：Planner → Multi-query Retrieval → Answer → Reviewer / bounded Repair → Final Citation Gate
+- **确定性检索链路**：Vector Search + BM25 / PostgreSQL FTS + RRF + `none / local / llm` reranker
+- **多租户与权限**：Tenant `Owner / Admin / Member`、Knowledge Base `Owner / Editor / Viewer`、JWT / rotating Refresh Token、带 scope / KB binding 的 Tenant API Key
+- **文档处理**：PDF / DOCX / TXT / MD / CSV / JSON / XML / HTML，CAP 异步索引，SignalR 进度通知、retry / reindex / cancel
+- **可选基础设施**：SQLite / PostgreSQL；Qdrant / pgvector；C# BM25 / PostgreSQL FTS；Local / MinIO / S3-compatible storage
+- **Tenant AI Provider 治理**：加密 Provider Connection、Chat / Embedding / Rerank Deployment、健康状态、显式 fallback、Tenant Defaults 与 KB 级角色路由
+- **Embedding Index Generation**：知识库级版本化重建、staging generation、成功后原子切换、失败时保留旧 active generation
+- **RAG Governance**：Evaluation Dataset / Run、KB RAG Profile、RAG Run Trace、Token / Cost / Budget / Daily quota、Model Pricing、Audit Log
+- **Prompt / Agent 管理**：版本化 Prompt Profile、Planner / Answer / Reviewer、Specialist Agent-as-Tool
+- **Webhook Automation**：事件订阅、签名/Secret 保护、HTTP 与 Slack / Discord / Teams / 飞书 / 钉钉 / 企业微信等渠道适配
+- **Chat UI**：assistant-ui External Store Runtime、SSE Agent Timeline、message-scoped citations / Evidence Panel、feedback、rename、archive / restore、bounded history pagination
+- **可观测性**：OpenTelemetry traces + metrics + OTLP；健康与 readiness endpoints
+- **验证**：xUnit + WebApplicationFactory、Vitest / accessibility tests、Playwright E2E、PostgreSQL / RabbitMQ / CAP / pgvector / PostgreSQL FTS native smoke
+- **管理后台**：React 19 + Vite 8 + TypeScript + Tailwind CSS 4 + Shadcn/Radix、TanStack Query / Router、自动 Refresh Token 轮换处理
+- **.NET 10 / EF Core 10**：多 migration、SQLite / PostgreSQL 兼容处理、Swagger
+
+详细专项说明见 [文档索引](docs/README.md)。
 
 ---
 
@@ -53,7 +49,7 @@ Api ───────► Infrastructure ───────► Application
  └──────────────────────────────────────► Domain
 ```
 
-`Program.cs` 只负责组合启动；API 路由按业务拆在 `KnowledgeRag.Api/Endpoints`，EF Core migrations 固定在 `KnowledgeRag.Infrastructure/Persistence/Migrations`。详细开发约定见 [`ARCHITECTURE.md`](ARCHITECTURE.md)。
+`Program.cs` 只负责组合启动；API 路由按业务拆在 `src/KnowledgeRag.Api/Endpoints`，EF Core migrations 固定在 `KnowledgeRag.Infrastructure/Persistence/Migrations`。详细开发约定见 [`ARCHITECTURE.md`](ARCHITECTURE.md)。
 
 ```text
 React / Vite / shadcn-admin
@@ -167,7 +163,7 @@ npm install
 npm run dev
 ```
 
-访问 `http://localhost:5173`。Vite 会把 `/api` 代理到 `http://localhost:8080`。
+访问 `http://localhost:5173`。Vite 会把 `/api` 与 SignalR 的 `/hubs` 代理到 `http://localhost:8080`；可用 `VITE_DEV_API_PROXY` 覆盖代理目标。
 
 构建到独立 `dist`：
 
@@ -181,19 +177,19 @@ npm run build
 npm run build:api
 ```
 
-Docker 不需要手工执行这些命令：`KnowledgeRag.Api/Dockerfile` 已增加 Node 22 前端构建阶段，最终 React 静态资源会自动进入 .NET 10 镜像。
+Docker 不需要手工执行这些命令：`src/KnowledgeRag.Api/Dockerfile` 已增加 Node 22 前端构建阶段，最终 React 静态资源会自动进入 .NET 10 镜像。
 
-管理后台已包含：
+管理后台当前包含：
 
 - 登录 / 注册 / Refresh Token 自动轮换
-- 总览 Dashboard
-- 知识库列表与创建
-- 文档上传、下载、删除与索引状态
+- Dashboard 与文档摄取任务状态
+- Knowledge Base CRUD、成员权限、文档上传 / 下载 / 删除 / retry / reindex / cancel
+- Knowledge Base Embedding Index generation 状态与版本化 Reindex
 - Vector / BM25 / RRF / reranker 检索调试
-- KnowledgeBase Owner / Editor / Viewer 成员管理
-- Tenant Owner / Admin / Member 管理
-- Tenant API Key / Scope / KnowledgeBase 范围管理
-- AgentSession 多轮 RAG 对话与来源展示
+- Tenant / Tenant Member / API Key / scopes / KB binding
+- Tenant AI Provider Connections、Model Deployments、health check、fallback、Tenant Defaults
+- Chat：assistant-ui、实时 Agent Timeline、可信引用与 Evidence Panel、feedback、rename、archive / restore、删除
+- Governance：RAG Profile、Run Trace、Evaluation、Model Pricing / Cost、Audit、Prompt Profile、Webhook Automation
 - Light / Dark mode 与响应式 Sidebar
 
 `shadcn-admin` 为 MIT License，相关归属说明见 `src/KnowledgeRag.Admin/THIRD_PARTY_NOTICES.md`。
@@ -219,10 +215,19 @@ POSTGRES_USER=knowledge_rag
 POSTGRES_PASSWORD=knowledge_rag_dev_password
 ```
 
-启动：
+启动时建议先等 PostgreSQL 健康，再启动应用，避免应用 migration 早于数据库 ready：
 
 ```bash
-docker compose --profile postgres up -d --build
+docker compose --profile postgres up -d postgres
+docker compose --profile postgres up -d --build app
+```
+
+如需 CAP 使用 RabbitMQ，还需设置 `CAP_TRANSPORT=rabbitmq` 并启用 `cap` profile：
+
+```bash
+docker compose --profile postgres --profile cap up -d postgres rabbitmq
+# 等待 PostgreSQL / RabbitMQ ready 后
+docker compose --profile postgres --profile cap up -d --build app
 ```
 
 `pgvector` 模式会初始化：
@@ -261,16 +266,17 @@ S3_SECRET_KEY=minioadmin
 S3_FORCE_PATH_STYLE=true
 ```
 
-启动：
+建议分两步启动，先等 MinIO 可用，再启动应用：
 
 ```bash
-docker compose --profile s3 up -d --build
+docker compose --profile s3 up -d minio
+docker compose --profile s3 up -d --build app
 ```
 
 - S3 API: `http://localhost:9000`
 - MinIO Console: `http://localhost:9001`
 
-`minio-init` 会自动创建 bucket。
+当前 Compose **没有** `minio-init` bucket 初始化服务，`S3FileStorage` 也不会自动创建 bucket。首次使用前，请打开 MinIO Console，使用 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 登录，并手动创建名称与 `S3_BUCKET` 一致的 bucket（默认 `knowledge-rag`）。
 
 `S3FileStorage` 使用 AWS Signature V4，请勿把真实生产密钥写入源码或提交到 Git。
 
@@ -294,19 +300,22 @@ S3_FORCE_PATH_STYLE=false
 }
 ```
 
-启动时执行：
+当 `Database:AutoMigrate=true`（默认值）时，应用启动会执行 EF Core migrations。生产环境也可以设置 `DATABASE_AUTO_MIGRATE=false`，改由发布流水线中的 migration bundle 执行 schema 更新。
 
-```csharp
-await db.Database.MigrateAsync();
-```
-
-项目已包含初始 production migration：
+当前 migration 不止初始 schema，包含：
 
 ```text
-src/KnowledgeRag.Infrastructure/Persistence/Migrations/
-  202610270001_InitialProduction.cs
-  AppDbContextModelSnapshot.cs
+202610270001_InitialProduction
+20261027050438_SyncCurrentModel
+20261028100000_PlatformGovernanceSuite
+20261028120000_WebhookChannelProviders
+20261028164203_TenantAiProviderFoundation
+20261029003620_TenantAiEmbeddingIndexGenerations
+20261029021050_AiDeploymentRoutingGovernance
+AppDbContextModelSnapshot.cs
 ```
+
+旧版 `EnsureCreated` 数据库不要直接执行最新 migration；升级步骤见 [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)。
 
 安装 EF CLI：
 
@@ -563,19 +572,26 @@ tests/KnowledgeRag.Api.IntegrationTests
 3. Tenant API Key -> scoped KB access
 4. `knowledge:admin` API Key 不会隐式获得 `tenant:admin`
 5. 非成员无法访问他人的知识库
-6. 外部后端测试：MinIO PUT/GET/DELETE
+6. 外部后端测试：MinIO PUT/GET/DELETE（需单独启用 `RUN_EXTERNAL_S3_TESTS=1` 并提供 MinIO）
 7. 外部后端测试：pgvector upsert/search/delete
 8. 外部后端测试：PostgreSQL FTS 真实检索
 
 普通 API 测试使用临时 SQLite DB，并实际启动 ASP.NET Core `WebApplicationFactory`，所以会覆盖 EF Migration、认证中间件、API 路由和权限服务。
 
-仓库还包含 `.github/workflows/ci.yml`：第一个 job 自动执行 `dotnet restore`、`dotnet build` 和普通集成测试；第二个 job 会启动 PostgreSQL/pgvector + PostgreSQL FTS + MinIO + OTel Collector，启动应用并检查 readiness，然后运行 `Category=ExternalBackend` 测试，真正通过项目代码访问 pgvector、PostgreSQL FTS 和 MinIO。
+仓库的 `.github/workflows/ci.yml` 当前分为两个主要验证 job：
+
+- `build-test`：前端执行 `npm ci`、production build、Vitest、Playwright；后端执行 .NET restore / Release build / integration tests。
+- `native-backends-smoke`：启动 PostgreSQL（pgvector）、RabbitMQ 与 OpenTelemetry Collector，使用 PostgreSQL + pgvector + PostgreSQL FTS + CAP/RabbitMQ 配置启动应用，检查 readiness 与 CAP schema，并运行 `Category=ExternalBackend` 测试。
+
+当前 native CI 使用 Local 文件存储，并不启动 MinIO；MinIO / S3 round-trip 测试需要单独提供 MinIO 并设置 `RUN_EXTERNAL_S3_TESTS=1`。
 
 ---
 
 # 11. API 摘要
 
-认证：
+所有需要身份的 API 均应使用当前登录的 Bearer JWT 或符合 scope / KB binding 的 `X-Api-Key`。具体请求模型以 Swagger 和对应 Endpoint / Application Contract 为准。
+
+认证与健康：
 
 ```text
 POST /api/auth/register
@@ -583,59 +599,104 @@ POST /api/auth/login
 POST /api/auth/refresh
 POST /api/auth/logout
 GET  /api/auth/me
+GET  /api/health
+GET  /api/health/ready
 ```
 
-Tenant：
+Tenant、成员与 API Key：
 
 ```text
-GET    /api/tenants
-POST   /api/tenants
-PUT    /api/tenants/{tenantId}
-DELETE /api/tenants/{tenantId}
-GET    /api/tenants/{tenantId}/members
-PUT    /api/tenants/{tenantId}/members
-DELETE /api/tenants/{tenantId}/members/{userId}
-GET    /api/tenants/{tenantId}/api-keys
-POST   /api/tenants/{tenantId}/api-keys
-DELETE /api/tenants/{tenantId}/api-keys/{apiKeyId}
+GET/POST          /api/tenants
+PUT/DELETE        /api/tenants/{tenantId}
+GET               /api/tenants/{tenantId}/members
+PUT               /api/tenants/{tenantId}/members
+DELETE            /api/tenants/{tenantId}/members/{memberUserId}
+GET/POST          /api/tenants/{tenantId}/api-keys
+DELETE            /api/tenants/{tenantId}/api-keys/{apiKeyId}
 ```
 
-知识库：
+Tenant AI Provider（详细步骤见 [AI 供应商配置指南](docs/AI_PROVIDER_CONFIGURATION.md)）：
 
 ```text
-GET    /api/knowledge-bases
-POST   /api/knowledge-bases
-GET    /api/knowledge-bases/{id}
-PUT    /api/knowledge-bases/{id}
-DELETE /api/knowledge-bases/{id}
+GET    /api/tenants/ai/providers
+GET    /api/tenants/{tenantId}/ai/connections
+POST   /api/tenants/{tenantId}/ai/connections
+POST   /api/tenants/{tenantId}/ai/connections/{connectionId}/test
+DELETE /api/tenants/{tenantId}/ai/connections/{connectionId}
+GET/POST /api/tenants/{tenantId}/ai/deployments
+POST   /api/tenants/{tenantId}/ai/deployments/{deploymentId}/health
+DELETE /api/tenants/{tenantId}/ai/deployments/{deploymentId}
+GET/PUT /api/tenants/{tenantId}/ai/defaults
 ```
 
-文档：
+Knowledge Base 与文档：
 
 ```text
-GET    /api/knowledge-bases/{kbId}/documents
-POST   /api/knowledge-bases/{kbId}/documents
-GET    /api/knowledge-bases/{kbId}/documents/{documentId}/file
-DELETE /api/knowledge-bases/{kbId}/documents/{documentId}
+GET/POST          /api/knowledge-bases
+GET/PUT/DELETE    /api/knowledge-bases/{knowledgeBaseId}
+GET               /api/knowledge-bases/{knowledgeBaseId}/members
+PUT               /api/knowledge-bases/{knowledgeBaseId}/members
+DELETE            /api/knowledge-bases/{knowledgeBaseId}/members/{memberUserId}
+GET               /api/knowledge-bases/{knowledgeBaseId}/embedding-index
+POST              /api/knowledge-bases/{knowledgeBaseId}/embedding-index/reindex
+
+GET/POST          /api/knowledge-bases/{knowledgeBaseId}/documents
+POST              /api/knowledge-bases/{knowledgeBaseId}/documents/{documentId}/retry
+POST              /api/knowledge-bases/{knowledgeBaseId}/documents/{documentId}/reindex
+POST              /api/knowledge-bases/{knowledgeBaseId}/documents/{documentId}/cancel
+GET               /api/knowledge-bases/{knowledgeBaseId}/documents/{documentId}/file
+DELETE            /api/knowledge-bases/{knowledgeBaseId}/documents/{documentId}
 ```
 
-RAG：
+Search、Chat 与 Conversation：
 
 ```text
-POST /api/search
-POST /api/chat
-POST /api/conversations
-GET  /api/conversations
-GET  /api/conversations/{id}/messages
-POST /api/conversations/{id}/messages
+POST   /api/search
+POST   /api/chat
+POST   /api/conversations
+GET    /api/conversations?knowledgeBaseId=...&archived=false
+PATCH  /api/conversations/{conversationId}
+POST   /api/conversations/{conversationId}/archive
+DELETE /api/conversations/{conversationId}/archive
+GET    /api/conversations/{conversationId}/messages
+GET    /api/conversations/{conversationId}/messages/page?before=...&limit=...
+POST   /api/conversations/{conversationId}/messages
+POST   /api/conversations/{conversationId}/messages/stream
+POST   /api/conversations/{conversationId}/messages/{messageId}/feedback
+DELETE /api/conversations/{conversationId}
 ```
 
-Health：
+治理中心（以下为主要路由族）：
 
 ```text
-GET /api/health
-GET /api/health/ready
+GET        /api/governance/overview
+GET/PUT    /api/governance/knowledge-bases/{knowledgeBaseId}/rag-profile
+GET        /api/governance/runs
+GET        /api/governance/audit
+GET/PUT    /api/governance/model-prices
+GET/POST   /api/governance/prompts
+PUT        /api/governance/prompts/{promptId}
+GET        /api/governance/webhooks/providers
+GET/POST   /api/governance/webhooks
+PUT/DELETE /api/governance/webhooks/{webhookId}
+POST       /api/governance/webhooks/{webhookId}/test
+GET/POST   /api/governance/evaluation/datasets
+GET/POST   /api/governance/evaluation/datasets/{datasetId}/cases
+GET        /api/governance/evaluation/runs
+POST       /api/governance/evaluation/datasets/{datasetId}/run
 ```
+
+其他管理端点：
+
+```text
+GET /api/dashboard
+GET /api/ingestion/jobs
+GET /api/settings/product
+GET /swagger
+SignalR hub: /hubs/documents
+```
+
+路由摘要不是完整 OpenAPI 规范；遇到参数、权限或响应差异时，以当前代码与 Swagger 为准。
 
 ---
 
@@ -666,10 +727,12 @@ PostgreSQL + pgvector + PostgreSQL FTS
 
 ## 安全提醒
 
-- 生产必须更换 `Auth:SigningKey`
-- 不要把 `.env`、S3 secret、模型 API key 提交到 Git
-- API Key 和 Refresh Token 明文都只应出现在客户端持有端
-- 移出租户成员前会阻止删除仍是某个知识库唯一 Owner 的成员，并同步清理其知识库成员关系
-- 知识库检索内容应被视为不可信数据，Agent prompt 中已加入间接 Prompt Injection 防护
-- S3 bucket 建议保持私有，通过本 API 做权限检查后流式下载
-- 生产迁移建议使用单独 deployment identity
+- 生产必须使用强随机 `AUTH_SIGNING_KEY`，并通过 secret store 注入 `SECRET_PROTECTION_MASTER_KEY`；更换主密钥前需评估现有 Tenant AI Provider Credential 的解密兼容性。
+- 不要把 `.env`、S3 secret、模型 API key 或 Webhook secret 提交到 Git。
+- API Key 与 Refresh Token 明文只在签发时返回；服务端持久化的是 hash / 受保护的 Secret。
+- 生产环境关闭公开注册（`AUTH_ALLOW_REGISTRATION=false`），并使用 HTTPS 与受控的网络出口。
+- Tenant Provider 的公网 URL / SSRF 校验不应被反向代理或私网地址绕过；不要把本机、私网、link-local 或 metadata endpoint 作为 Provider / Webhook 目标。
+- 知识库检索内容应被视为不可信数据；最终 Citation Gate、RBAC 与确定性检索策略不能被用户内容或 Prompt 覆盖。
+- S3 bucket 建议保持私有，通过本 API 做权限检查后流式下载。
+- 生产迁移建议使用单独 deployment identity；应用运行账号不应长期持有 DDL 权限。
+- 新增或修改功能后同步校准相关文档；纯文档变更不需要伪造运行时 Changelog 条目。
