@@ -13,12 +13,10 @@ public sealed class OpenAiCompatibleEmbeddingService
     private readonly AiOptions _options;
     private readonly AiProviderClientFactory? _clientFactory;
 
-    public OpenAiCompatibleEmbeddingService(HttpClient httpClient, IOptions<AiOptions> options)
-        : this(httpClient, options, null)
-    {
-    }
-
-    public OpenAiCompatibleEmbeddingService(HttpClient httpClient, IOptions<AiOptions> options, AiProviderClientFactory? clientFactory)
+    public OpenAiCompatibleEmbeddingService(
+        HttpClient httpClient,
+        IOptions<AiOptions> options,
+        AiProviderClientFactory? clientFactory = null)
     {
         _httpClient = httpClient;
         _options = options.Value;
