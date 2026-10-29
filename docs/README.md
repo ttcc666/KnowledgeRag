@@ -8,6 +8,9 @@
 |---|---|---|
 | 了解项目与启动 | [根 README](../README.md) | 当前能力、默认组合、Docker、前端、API 概览 |
 | 配置 AI 供应商 | [AI Provider Configuration](AI_PROVIDER_CONFIGURATION.md) | Provider Connection、Deployment、health/fallback、Tenant Defaults、KB 路由、Embedding Reindex、Pricing |
+| 管理 RAG 治理与评估 | [Governance & Evaluation](GOVERNANCE_EVALUATION.md) | RAG Profile、Run Trace、Budget Reservation、Model Pricing、Prompt、Audit、Evaluation v3 |
+| 配置自动通知 | [Webhook Automation](WEBHOOK_AUTOMATION.md) | Event Types、Slack/Discord/Teams/飞书/钉钉/企业微信、自定义 HMAC、CAP retry、SSRF |
+| 生产部署与排障 | [Production Operations](PRODUCTION_OPERATIONS.md) | PostgreSQL/RabbitMQ/Search/Storage/OTel、health、migration、备份恢复、Secret rotation、故障排查 |
 | 理解 RAG 执行链 | [RAG Agent Workflow](RAG_AGENT_WORKFLOW.md) | Planner、Multi-query Retrieval、Answer、Reviewer/Repair、Citation Gate、Evaluation |
 | 理解模块边界 | [系统架构](../ARCHITECTURE.md) | Domain / Application / Infrastructure / Api、核心模块与运行时流程 |
 | 配置异步文档处理 | [CAP + SignalR ingestion](../CAP_SIGNALR_INGESTION.md) | 单文档摄取、CAP、SignalR、KB-wide Embedding generation |
@@ -17,12 +20,44 @@
 | 理解非 Azure 方案 | [Azure 架构替换说明](../CHANGES_FROM_AZURE.md) | 当前后端与 Azure 专有服务的映射 |
 | 查看变更历史 | [CHANGELOG](../CHANGELOG.md) | 已完成功能、修复、安全与验证记录 |
 
+## 按角色阅读
+
+### 开发者
+
+建议顺序：
+
+1. [系统架构](../ARCHITECTURE.md)
+2. [RAG Agent Workflow](RAG_AGENT_WORKFLOW.md)
+3. [开发流程与 CI 策略](../DEVELOPMENT_WORKFLOW.md)
+4. [验证指南](../VALIDATION.md)
+
+### 管理员 / AI Platform Owner
+
+建议顺序：
+
+1. [AI Provider Configuration](AI_PROVIDER_CONFIGURATION.md)
+2. [Governance & Evaluation](GOVERNANCE_EVALUATION.md)
+3. [Webhook Automation](WEBHOOK_AUTOMATION.md)
+
+### 运维 / SRE
+
+建议顺序：
+
+1. [Production Operations](PRODUCTION_OPERATIONS.md)
+2. [数据库迁移指南](../MIGRATION_GUIDE.md)
+3. [CAP + SignalR ingestion](../CAP_SIGNALR_INGESTION.md)
+4. [验证指南](../VALIDATION.md)
+
 ## 当前代码入口
 
 - API Endpoint 注册：`src/KnowledgeRag.Api/Endpoints/EndpointRegistration.cs`
+- Governance API：`src/KnowledgeRag.Api/Endpoints/GovernanceEndpoints.cs`
 - AI Provider / Deployment / Tenant Defaults：`src/KnowledgeRag.Infrastructure/Tenancy/TenantAiProviderService.cs`
 - RAG Workflow：`src/KnowledgeRag.Infrastructure/Conversations/RagAgentService.cs`
-- Runtime Profile / route snapshot / budget：`src/KnowledgeRag.Infrastructure/Governance/RagRuntimeProfileService.cs`
+- Runtime Profile / route snapshot：`src/KnowledgeRag.Infrastructure/Governance/RagRuntimeProfileService.cs`
+- Budget / Run settlement：`src/KnowledgeRag.Infrastructure/Governance/RagRunAccountingService.cs`
+- Evaluation：`src/KnowledgeRag.Infrastructure/Governance/EvaluationService.cs`
+- Webhook：`src/KnowledgeRag.Infrastructure/Governance/WebhookAutomationService.cs`
 - 单文档 ingestion：`src/KnowledgeRag.Infrastructure/Documents/KnowledgeIngestionService.cs`
 - KB-wide Embedding generation：`src/KnowledgeRag.Infrastructure/Documents/KnowledgeBaseIndexGenerationService.cs`
 - Hybrid Search：`src/KnowledgeRag.Infrastructure/Search/KnowledgeSearchService.cs`
