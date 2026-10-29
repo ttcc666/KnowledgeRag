@@ -1,4 +1,5 @@
 using System.Net;
+using KnowledgeRag.Api.Extensions;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
