@@ -89,20 +89,42 @@ public sealed class ExternalBackendTests
         var secondId = Guid.NewGuid();
         var first = new float[1536]; first[0] = 1;
         var second = new float[1536]; second[1] = 1;
+        var firstGenerationId = Guid.NewGuid();
+        var secondGenerationId = Guid.NewGuid();
+        var firstGenerationPointId = Guid.NewGuid();
+        var secondGenerationPointId = Guid.NewGuid();
+        var firstGenerationVector = new float[3]; firstGenerationVector[0] = 1;
+        var secondGenerationVector = new float[5]; secondGenerationVector[0] = 1;
         try
         {
             await vectorStore.UpsertAsync([
                 new VectorPoint(firstId, kbId, documentId, "a.txt", 0, first),
                 new VectorPoint(secondId, kbId, documentId, "a.txt", 1, second)
             ]);
+            await vectorStore.UpsertAsync([
+                new VectorPoint(firstGenerationPointId, kbId, documentId, "a.txt", 0, firstGenerationVector, firstGenerationId)
+            ]);
+            await vectorStore.UpsertAsync([
+                new VectorPoint(secondGenerationPointId, kbId, documentId, "a.txt", 0, secondGenerationVector, secondGenerationId)
+            ]);
+
             var hits = await vectorStore.SearchAsync(first, kbId, 2);
             Assert.NotEmpty(hits);
             Assert.Equal(firstId, hits[0].PointId);
             Assert.True(hits[0].Score > 0.99);
+
+            var firstGenerationHits = await vectorStore.SearchAsync(firstGenerationVector, kbId, firstGenerationId, 2);
+            Assert.Single(firstGenerationHits);
+            Assert.Equal(firstGenerationPointId, firstGenerationHits[0].PointId);
+            var secondGenerationHits = await vectorStore.SearchAsync(secondGenerationVector, kbId, secondGenerationId, 2);
+            Assert.Single(secondGenerationHits);
+            Assert.Equal(secondGenerationPointId, secondGenerationHits[0].PointId);
         }
         finally
         {
             await vectorStore.DeleteAsync([firstId, secondId]);
+            await vectorStore.DeleteGenerationAsync(kbId, firstGenerationId);
+            await vectorStore.DeleteGenerationAsync(kbId, secondGenerationId);
         }
     }
 
@@ -138,10 +160,16 @@ public sealed class ExternalBackendTests
             Id = Guid.NewGuid(), KnowledgeBaseId = kb.Id, DocumentId = document.Id, ChunkIndex = 0,
             Text = "invoice approval policy requires manager review", CharacterCount = 47, CreatedAt = now
         };
+        var stagedGenerationId = Guid.NewGuid();
+        var stagedChunk = new DocumentChunkEntity
+        {
+            Id = Guid.NewGuid(), KnowledgeBaseId = kb.Id, DocumentId = document.Id, IndexGenerationId = stagedGenerationId, ChunkIndex = 0,
+            Text = "invoice approval staging generation requires director review", CharacterCount = 56, CreatedAt = now.AddSeconds(1)
+        };
         db.AddRange(user, tenant,
             new TenantMemberEntity { TenantId = tenant.Id, UserId = user.Id, Role = TenantRole.Owner, AddedAt = now }, kb,
             new KnowledgeBaseMemberEntity { KnowledgeBaseId = kb.Id, UserId = user.Id, Role = KnowledgeBaseRole.Owner, AddedAt = now },
-            document, chunk);
+            document, chunk, stagedChunk);
         await db.SaveChangesAsync();
 
         try
@@ -153,6 +181,11 @@ public sealed class ExternalBackendTests
             var hit = Assert.Single(results);
             Assert.Equal(chunk.Id, hit.PointId);
             Assert.True(hit.Bm25Score is > 0);
+
+            var stagedResults = await service.SearchAsync(kb.Id, stagedGenerationId, "invoice", 10);
+            var stagedHit = Assert.Single(stagedResults);
+            Assert.Equal(stagedChunk.Id, stagedHit.PointId);
+            Assert.NotEqual(hit.PointId, stagedHit.PointId);
         }
         finally
         {

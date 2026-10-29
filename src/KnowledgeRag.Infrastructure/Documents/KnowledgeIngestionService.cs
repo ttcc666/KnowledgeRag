@@ -250,9 +250,11 @@ public sealed class KnowledgeIngestionService(
             var oldPointIds = oldChunks.Select(x => x.Id).ToList();
             await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))
             {
-                var knowledgeBase = await db.KnowledgeBases.SingleAsync(x => x.Id == request.KnowledgeBaseId, cancellationToken);
-                await db.Entry(knowledgeBase).ReloadAsync(cancellationToken);
-                if (knowledgeBase.ActiveIndexGenerationId != indexGenerationId)
+                var activatedAt = DateTimeOffset.UtcNow;
+                var activeGenerationGuard = await db.KnowledgeBases
+                    .Where(x => x.Id == request.KnowledgeBaseId && x.ActiveIndexGenerationId == indexGenerationId)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.UpdatedAt, activatedAt), cancellationToken);
+                if (activeGenerationGuard != 1)
                     throw new ActiveIndexGenerationChangedException();
 
                 if (oldChunks.Count > 0) db.DocumentChunks.RemoveRange(oldChunks);
@@ -260,8 +262,7 @@ public sealed class KnowledgeIngestionService(
                 document.ChunkCount = chunkEntities.Count;
                 document.Status = DocumentStatus.Ready;
                 document.LastError = null;
-                document.UpdatedAt = DateTimeOffset.UtcNow;
-                knowledgeBase.UpdatedAt = document.UpdatedAt;
+                document.UpdatedAt = activatedAt;
                 await db.SaveChangesAsync(cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
             }
@@ -560,25 +561,45 @@ public sealed class KnowledgeIngestionService(
 
     public async Task<bool> DeleteAsync(Guid knowledgeBaseId, Guid documentId, CancellationToken cancellationToken = default)
     {
-        var document = await db.Documents.SingleOrDefaultAsync(x => x.Id == documentId && x.KnowledgeBaseId == knowledgeBaseId, cancellationToken);
-        if (document is null) return false;
-        if (document.Status is DocumentStatus.Queued or DocumentStatus.Processing)
-            throw new InvalidOperationException("文档正在后台索引，请先取消任务或等待处理完成。");
-        var participatesInBuildingGeneration = await (from generationDocument in db.KnowledgeBaseIndexGenerationDocuments.AsNoTracking()
-            join generation in db.KnowledgeBaseIndexGenerations.AsNoTracking() on generationDocument.IndexGenerationId equals generation.Id
-            where generationDocument.DocumentId == documentId && generation.Status == KnowledgeBaseIndexGenerationStatuses.Building
-            select generationDocument.DocumentId).AnyAsync(cancellationToken);
-        if (participatesInBuildingGeneration)
-            throw new InvalidOperationException("知识库正在重建索引，此文档参与当前重建，请等待任务结束后再删除。");
-        var chunks = await db.DocumentChunks.AsNoTracking().Where(x => x.DocumentId == documentId)
-            .Select(x => new { x.Id, x.IndexGenerationId }).ToListAsync(cancellationToken);
+        DocumentEntity document;
+        List<(Guid Id, Guid IndexGenerationId)> chunks;
+        await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))
+        {
+            document = await db.Documents.SingleOrDefaultAsync(x => x.Id == documentId && x.KnowledgeBaseId == knowledgeBaseId, cancellationToken)
+                ?? null!;
+            if (document is null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return false;
+            }
+            if (document.Status is DocumentStatus.Queued or DocumentStatus.Processing)
+                throw new InvalidOperationException("文档正在后台索引，请先取消任务或等待处理完成。");
+
+            var knowledgeBase = await db.KnowledgeBases.SingleAsync(x => x.Id == knowledgeBaseId, cancellationToken);
+            knowledgeBase.UpdatedAt = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(cancellationToken);
+
+            var participatesInBuildingGeneration = await (from generationDocument in db.KnowledgeBaseIndexGenerationDocuments.AsNoTracking()
+                join generation in db.KnowledgeBaseIndexGenerations.AsNoTracking() on generationDocument.IndexGenerationId equals generation.Id
+                where generationDocument.DocumentId == documentId && generation.Status == KnowledgeBaseIndexGenerationStatuses.Building
+                select generationDocument.DocumentId).AnyAsync(cancellationToken);
+            if (participatesInBuildingGeneration)
+                throw new InvalidOperationException("知识库正在重建索引，此文档参与当前重建，请等待任务结束后再删除。");
+
+            chunks = await db.DocumentChunks.AsNoTracking().Where(x => x.DocumentId == documentId)
+                .Select(x => new ValueTuple<Guid, Guid>(x.Id, x.IndexGenerationId)).ToListAsync(cancellationToken);
+            db.Documents.Remove(document);
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+
         foreach (var generationGroup in chunks.GroupBy(x => x.IndexGenerationId))
-            await vectorStore.DeleteAsync(generationGroup.Key, generationGroup.Select(x => x.Id).ToList(), cancellationToken);
-        await fileStorage.DeleteAsync(knowledgeBaseId, document.StoredFileName, cancellationToken);
-        var knowledgeBase = await db.KnowledgeBases.SingleAsync(x => x.Id == knowledgeBaseId, cancellationToken);
-        knowledgeBase.UpdatedAt = DateTimeOffset.UtcNow;
-        db.Documents.Remove(document);
-        await db.SaveChangesAsync(cancellationToken);
+        {
+            try { await vectorStore.DeleteAsync(generationGroup.Key, generationGroup.Select(x => x.Id).ToList(), cancellationToken); }
+            catch (Exception ex) { logger.LogWarning(ex, "Failed to clean vectors after deleting document {DocumentId}, generation {GenerationId}", documentId, generationGroup.Key); }
+        }
+        try { await fileStorage.DeleteAsync(knowledgeBaseId, document.StoredFileName, cancellationToken); }
+        catch (Exception ex) { logger.LogWarning(ex, "Failed to delete stored file after deleting document {DocumentId}", documentId); }
         return true;
     }
 
