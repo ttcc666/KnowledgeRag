@@ -52,7 +52,9 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
                 ["SearchBackend:AutoInitializeNativeIndexes"] = "false",
                 ["Storage:Provider"] = "local",
                 ["Storage:RootPath"] = _rootPath,
-                ["OpenTelemetry:Enabled"] = "false"
+                ["OpenTelemetry:Enabled"] = "false",
+                ["RateLimiting:PermitLimit"] = "10000",
+                ["RateLimiting:WindowSeconds"] = "60"
             });
         });
     }

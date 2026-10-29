@@ -19,7 +19,7 @@
    ~~~
 
 2. 核对根目录 .env 与 docker-compose.yml 中的配置名，特别是 DATABASE_PROVIDER、DATABASE_CONNECTION_STRING、AUTH_SIGNING_KEY、SECRET_PROTECTION_MASTER_KEY、AI_API_KEY。
-3. 当前 Auth SigningKey 要求至少 32 字节，但生产不能使用 appsettings.json 中公开的占位值；生产应显式注入随机密钥。
+3. Production 启动会拒绝已知 Auth:SigningKey 占位值，并要求至少 32 字节、且与 Auth:SigningKey 不同的 SecretProtection:MasterKey。检查部署 Secret Store 中这两个值是否均存在且相互独立。
 4. 确认容器使用 .NET 10 镜像与当前配置；CI 的 .NET 版本为 10.0.x。
 
 **修复与验证**
@@ -262,7 +262,7 @@ dotnet test tests/KnowledgeRag.Api.IntegrationTests/KnowledgeRag.Api.Integration
 3. Reservation 的过期 TTL 当前为 1 小时；陈旧 Reservation 会标记为 reservation-expired。
 4. 核对 Tenant Model Pricing 与 Deployment-specific pricing。不同 Provider 使用同名模型时，应使用 Deployment identity 区分计价。
 5. 当前成本记录属于项目的估算与治理账本，不应默认等同于 Provider 最终账单。
-6. 当前没有统一的应用层 429 rate limit contract；不要把预算拒绝一律当作 HTTP 429。
+6. API 默认每个 API Key / 已认证用户 / 匿名 IP 每 60 秒允许 120 次请求；登录、注册和刷新令牌接口另默认限制每来源 IP 每 60 秒 10 次，且不超过全局上限。超限返回 429 并带 Retry-After。检查 RateLimiting:PermitLimit、RateLimiting:AuthPermitLimit 和 RateLimiting:WindowSeconds。该限流为单实例内存计数，多实例还需要 Gateway 限流。预算拒绝不是统一的 429 契约，部分业务错误仍可能返回 400。
 
 **修复与验证**
 
@@ -396,3 +396,31 @@ dotnet test KnowledgeRag.NonAzure.sln -c Release --no-build
 ~~~
 
 纯前端验证见第 12 节。PostgreSQL / RabbitMQ / CAP / pgvector / PostgreSQL FTS 的 native smoke 需要实际外部依赖，不可用 SQLite 测试代替。完整 CI 范围见 [DEVELOPMENT_WORKFLOW.md](../DEVELOPMENT_WORKFLOW.md) 和 [VALIDATION.md](../VALIDATION.md)。
+
+
+## 附录：文件上传与文档解析资源限制
+
+**现象**
+
+- 上传请求返回 413，或文件上传在请求体解析阶段失败。
+- 文档进入索引流程后，PDF 页数过多、文本提取超限或 HTML 解析超时，导致该文档处理失败。
+
+**检查**
+
+1. 查看运行时配置：`Rag:MaxUploadMegabytes`（默认 30，允许 1–63）、`Rag:MaxExtractedCharacters`（默认 2,000,000）和 `Rag:MaxPdfPages`（默认 1,000）。
+2. Docker Compose 部署可核对容器实际配置：
+
+   ```bash
+   docker compose exec app printenv | grep -E 'RAG__MAXUPLOADMEGABYTES|RAG__MAXEXTRACTEDCHARACTERS|RAG__MAXPDFPAGES'
+   ```
+
+3. 对照原始文件大小、PDF 页数和可提取文本长度；不要只按压缩文件大小估算解析后的资源消耗。
+4. 查看 `docker compose logs app` 中的索引任务失败记录；解析限制异常应与数据库连接、Embedding Provider 错误分开处理。
+
+**修复与验证**
+
+- 413 表示请求体超过 Kestrel / multipart 限制；先确认代理层上限与 `Rag:MaxUploadMegabytes` 一致，不要直接移除请求体限制。
+- PDF 超过页数上限时，拆分文件或经评估后调整 `Rag:MaxPdfPages`；提取文本超限时，拆分文档或审慎调整 `Rag:MaxExtractedCharacters`。
+- 启动时若提示 `MaxUploadMegabytes` 配置无效，设置为 1–63 的整数；提取字符数和 PDF 页数也必须处于代码允许的范围。
+- 重试单个失败文档并确认索引任务完成、Search 能召回新文档；避免无条件重复触发整库重建。
+- 这些限制降低资源耗尽风险，但不是恶意文件扫描或解析沙箱。遇到反复超时、异常内存增长或可疑文件，应隔离样本并检查资源指标。

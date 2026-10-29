@@ -46,6 +46,16 @@ public sealed class AuditLogMiddleware(RequestDelegate next)
                     "DELETE" => "delete",
                     _ => context.Request.Method.ToLowerInvariant()
                 };
+                var statusCode = failure is null
+                    ? context.Response.StatusCode
+                    : failure switch
+                    {
+                        UnauthorizedAccessException => StatusCodes.Status403Forbidden,
+                        KeyNotFoundException => StatusCodes.Status404NotFound,
+                        WebhookDestinationBlockedException => StatusCodes.Status400BadRequest,
+                        InvalidOperationException => StatusCodes.Status400BadRequest,
+                        _ => StatusCodes.Status500InternalServerError
+                    };
                 await governance.WriteAuditAsync(
                     actor,
                     tenantId,
@@ -53,10 +63,10 @@ public sealed class AuditLogMiddleware(RequestDelegate next)
                     ResourceType(path),
                     resourceId,
                     $"{context.Request.Method} {path}",
-                    failure is null ? context.Response.StatusCode : 500,
+                    statusCode,
                     context.Connection.RemoteIpAddress?.ToString(),
                     context.Request.Headers.UserAgent.ToString(),
-                    new { route = path, failed = failure is not null, errorType = failure?.GetType().Name },
+                    new { route = path, failed = statusCode >= 400, errorType = failure?.GetType().Name },
                     CancellationToken.None);
             }
             catch

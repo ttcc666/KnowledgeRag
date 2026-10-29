@@ -140,12 +140,19 @@ cp .env.example .env
 
 至少修改：
 
-```env
-AI_API_KEY=your-key
-AUTH_SIGNING_KEY=replace-with-a-long-random-secret-at-least-32-characters
+```bash
+# 生成两份彼此独立的随机密钥；分别写入下面两个变量
+openssl rand -base64 48
+openssl rand -base64 48
 ```
 
-启动：
+```env
+AI_API_KEY=your-key
+AUTH_SIGNING_KEY=<第一份随机值>
+SECRET_PROTECTION_MASTER_KEY=<第二份不同的随机值>
+```
+
+Production 启动会拒绝公开占位 SigningKey，并要求独立的 `SECRET_PROTECTION_MASTER_KEY`；不要把上面的尖括号占位文本直接写入部署配置。
 
 ```bash
 docker compose up -d --build
