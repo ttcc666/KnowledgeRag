@@ -163,7 +163,7 @@ npm install
 npm run dev
 ```
 
-访问 `http://localhost:5173`。Vite 会把 `/api` 代理到 `http://localhost:8080`。
+访问 `http://localhost:5173`。Vite 会把 `/api` 与 SignalR 的 `/hubs` 代理到 `http://localhost:8080`；可用 `VITE_DEV_API_PROXY` 覆盖代理目标。
 
 构建到独立 `dist`：
 
