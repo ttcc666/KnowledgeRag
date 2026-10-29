@@ -117,7 +117,8 @@ public sealed class TenantAiProviderService(
                           where deployment.TenantId == tenantId && connection.TenantId == tenantId
                           select new AiModelDeploymentSummary(deployment.Id, deployment.TenantId, deployment.ConnectionId, connection.Name,
                               deployment.DisplayName, deployment.RemoteModelName, deployment.ModelType, deployment.EmbeddingDimensions,
-                              deployment.IsEnabled, deployment.UpdatedAt)).ToListAsync(ct);
+                              deployment.IsEnabled, deployment.UpdatedAt, deployment.FallbackDeploymentId, deployment.HealthStatus,
+                              deployment.LastHealthCheckedAt, deployment.LastHealthError)).ToListAsync(ct);
         return rows.OrderBy(x => x.ModelType).ThenBy(x => x.DisplayName, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
@@ -136,6 +137,8 @@ public sealed class TenantAiProviderService(
             throw new InvalidOperationException("只有 Embedding Deployment 可以配置维度。");
 
         var now = DateTimeOffset.UtcNow;
+        var entityId = request.Id ?? Guid.NewGuid();
+        await ValidateFallbackAsync(tenantId, entityId, request.FallbackDeploymentId, modelType, ct);
         AiModelDeploymentEntity entity;
         if (request.Id is Guid id)
         {
@@ -146,6 +149,10 @@ public sealed class TenantAiProviderService(
             entity.RemoteModelName = remoteModel;
             entity.ModelType = modelType;
             entity.EmbeddingDimensions = request.EmbeddingDimensions;
+            entity.FallbackDeploymentId = request.FallbackDeploymentId;
+            entity.HealthStatus = AiDeploymentHealthStatuses.Unknown;
+            entity.LastHealthCheckedAt = null;
+            entity.LastHealthError = null;
             entity.IsEnabled = request.IsEnabled;
             entity.UpdatedAt = now;
         }
@@ -153,15 +160,25 @@ public sealed class TenantAiProviderService(
         {
             entity = new AiModelDeploymentEntity
             {
-                Id = Guid.NewGuid(), TenantId = tenantId, ConnectionId = request.ConnectionId, DisplayName = displayName,
+                Id = entityId, TenantId = tenantId, ConnectionId = request.ConnectionId, DisplayName = displayName,
                 RemoteModelName = remoteModel, ModelType = modelType, EmbeddingDimensions = request.EmbeddingDimensions,
+                FallbackDeploymentId = request.FallbackDeploymentId, HealthStatus = AiDeploymentHealthStatuses.Unknown,
                 IsEnabled = request.IsEnabled, CreatedAt = now, UpdatedAt = now
             };
             db.Add(entity);
         }
+        db.AuditLogs.Add(new AuditLogEntity
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, UserId = actor.UserId, ApiKeyId = actor.ApiKeyId,
+            Action = "ai.deployment.saved", ResourceType = "ai-deployment", ResourceId = entity.Id.ToString(),
+            Summary = $"Saved {entity.ModelType} deployment {entity.DisplayName}.",
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { entity.ConnectionId, entity.FallbackDeploymentId, entity.IsEnabled }),
+            StatusCode = 200, CreatedAt = now
+        });
         await db.SaveChangesAsync(ct);
         return new AiModelDeploymentSummary(entity.Id, tenantId, entity.ConnectionId, connection.Name, entity.DisplayName,
-            entity.RemoteModelName, entity.ModelType, entity.EmbeddingDimensions, entity.IsEnabled, entity.UpdatedAt);
+            entity.RemoteModelName, entity.ModelType, entity.EmbeddingDimensions, entity.IsEnabled, entity.UpdatedAt,
+            entity.FallbackDeploymentId, entity.HealthStatus, entity.LastHealthCheckedAt, entity.LastHealthError);
     }
 
     public async Task DeleteDeploymentAsync(ActorContext actor, Guid tenantId, Guid deploymentId, CancellationToken ct = default)
@@ -172,6 +189,11 @@ public sealed class TenantAiProviderService(
         var defaults = await db.Set<TenantAiDefaultsEntity>().SingleOrDefaultAsync(x => x.TenantId == tenantId, ct);
         if (defaults is not null && (defaults.DefaultChatDeploymentId == deploymentId || defaults.DefaultEmbeddingDeploymentId == deploymentId || defaults.DefaultRerankerDeploymentId == deploymentId))
             throw new InvalidOperationException("该 Deployment 正在被租户默认配置使用，请先修改默认模型。");
+        if (await db.AiModelDeployments.AnyAsync(x => x.FallbackDeploymentId == deploymentId, ct))
+            throw new InvalidOperationException("该 Deployment 正在被其他 Deployment 作为 fallback 使用，请先修改 fallback 链。");
+        if (await db.KnowledgeBaseRagProfiles.AnyAsync(x => x.PlannerDeploymentId == deploymentId || x.AnswerDeploymentId == deploymentId ||
+            x.ReviewerDeploymentId == deploymentId || x.RerankerDeploymentId == deploymentId, ct))
+            throw new InvalidOperationException("该 Deployment 正在被知识库 RAG Profile 使用，请先修改角色路由。");
         db.Remove(entity);
         await db.SaveChangesAsync(ct);
     }
@@ -217,7 +239,53 @@ public sealed class TenantAiProviderService(
             AiModelTypes.Rerank => defaults?.DefaultRerankerDeploymentId,
             _ => throw new InvalidOperationException($"不支持的模型类型：{modelType}。")
         };
-        return deploymentId.HasValue ? await ResolveEndpointAsync(tenantId, deploymentId.Value, modelType, ct) : null;
+        return deploymentId.HasValue ? await ResolveEndpointWithFallbackAsync(tenantId, deploymentId.Value, modelType, ct) : null;
+    }
+
+    public async Task<AiDeploymentHealthResult> TestDeploymentHealthAsync(
+        ActorContext actor,
+        Guid tenantId,
+        Guid deploymentId,
+        CancellationToken ct = default)
+    {
+        await access.RequireAsync(actor, tenantId, TenantRole.Admin, ct);
+        var row = await (from deployment in db.AiModelDeployments
+                         join connection in db.AiProviderConnections.AsNoTracking() on deployment.ConnectionId equals connection.Id
+                         where deployment.Id == deploymentId && deployment.TenantId == tenantId && connection.TenantId == tenantId
+                         select new { Deployment = deployment, Connection = connection }).SingleOrDefaultAsync(ct)
+            ?? throw new KeyNotFoundException("Model Deployment 不存在。");
+        var checkedAt = DateTimeOffset.UtcNow;
+        var success = false;
+        string message;
+        try
+        {
+            if (!row.Deployment.IsEnabled || !row.Connection.IsEnabled)
+                throw new InvalidOperationException("Deployment 或 Provider Connection 已停用。");
+            var endpoint = ToEndpoint(row.Connection, row.Deployment.Id, row.Deployment.RemoteModelName);
+            using var client = clientFactory.CreateHttpClient(endpoint);
+            using var request = clientFactory.CreateJsonRequest(endpoint, HttpMethod.Get, "models");
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+            success = response.IsSuccessStatusCode;
+            message = success ? "Deployment health check 成功。" : $"Provider 返回 {(int)response.StatusCode} {response.StatusCode}。";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            message = ex.Message.Length <= 300 ? ex.Message : ex.Message[..300];
+        }
+
+        row.Deployment.HealthStatus = success ? AiDeploymentHealthStatuses.Healthy : AiDeploymentHealthStatuses.Unhealthy;
+        row.Deployment.LastHealthCheckedAt = checkedAt;
+        row.Deployment.LastHealthError = success ? null : message;
+        db.AuditLogs.Add(new AuditLogEntity
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, UserId = actor.UserId, ApiKeyId = actor.ApiKeyId,
+            Action = "ai.deployment.health", ResourceType = "ai-deployment", ResourceId = deploymentId.ToString(),
+            Summary = success ? "Deployment health check passed." : "Deployment health check failed.",
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { status = row.Deployment.HealthStatus }),
+            StatusCode = success ? 200 : 503, CreatedAt = checkedAt
+        });
+        await db.SaveChangesAsync(ct);
+        return new AiDeploymentHealthResult(deploymentId, success, row.Deployment.HealthStatus, message, checkedAt);
     }
 
     public async Task<EmbeddingEndpointResolution> ResolveEmbeddingTargetAsync(Guid knowledgeBaseId, CancellationToken ct = default)
@@ -298,6 +366,32 @@ public sealed class TenantAiProviderService(
             "Platform default",
             null);
 
+    public async Task<ResolvedAiEndpoint> ResolveEndpointWithFallbackAsync(Guid tenantId, Guid deploymentId, string expectedType, CancellationToken ct = default)
+    {
+        var visited = new HashSet<Guid>();
+        var currentId = deploymentId;
+        for (var depth = 0; depth < 16; depth++)
+        {
+            if (!visited.Add(currentId))
+                throw new InvalidOperationException("Model Deployment fallback 链存在循环。");
+            var row = await (from deployment in db.AiModelDeployments.AsNoTracking()
+                             join connection in db.AiProviderConnections.AsNoTracking() on deployment.ConnectionId equals connection.Id
+                             where deployment.Id == currentId && deployment.TenantId == tenantId && connection.TenantId == tenantId
+                             select new { Deployment = deployment, Connection = connection }).SingleOrDefaultAsync(ct)
+                ?? throw new InvalidOperationException("Model Deployment 不存在或不属于当前租户。");
+            if (!row.Deployment.ModelType.Equals(expectedType, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"Model Deployment 类型应为 {expectedType}。");
+
+            var available = row.Deployment.IsEnabled && row.Connection.IsEnabled &&
+                            !row.Deployment.HealthStatus.Equals(AiDeploymentHealthStatuses.Unhealthy, StringComparison.OrdinalIgnoreCase);
+            if (available) return ToEndpoint(row.Connection, row.Deployment.Id, row.Deployment.RemoteModelName);
+            if (row.Deployment.FallbackDeploymentId is not Guid fallbackId)
+                throw new InvalidOperationException($"Deployment '{row.Deployment.DisplayName}' 当前不可用，且未配置 fallback。");
+            currentId = fallbackId;
+        }
+        throw new InvalidOperationException("Model Deployment fallback 链超过允许深度。");
+    }
+
     public async Task<ResolvedAiEndpoint> ResolveEndpointAsync(Guid tenantId, Guid deploymentId, string expectedType, CancellationToken ct = default)
     {
         var row = await (from deployment in db.Set<AiModelDeploymentEntity>().AsNoTracking()
@@ -321,6 +415,27 @@ public sealed class TenantAiProviderService(
     {
         if (!deploymentId.HasValue) return;
         _ = await ResolveEndpointAsync(tenantId, deploymentId.Value, modelType, ct);
+    }
+
+    private async Task ValidateFallbackAsync(Guid tenantId, Guid deploymentId, Guid? fallbackDeploymentId, string modelType, CancellationToken ct)
+    {
+        if (!fallbackDeploymentId.HasValue) return;
+        var currentId = fallbackDeploymentId.Value;
+        var visited = new HashSet<Guid> { deploymentId };
+        for (var depth = 0; depth < 16; depth++)
+        {
+            if (!visited.Add(currentId)) throw new InvalidOperationException("Model Deployment fallback 不能形成循环。");
+            var row = await db.AiModelDeployments.AsNoTracking()
+                .Where(x => x.Id == currentId && x.TenantId == tenantId)
+                .Select(x => new { x.Id, x.ModelType, x.FallbackDeploymentId })
+                .SingleOrDefaultAsync(ct)
+                ?? throw new InvalidOperationException("Fallback Deployment 不存在或不属于当前租户。");
+            if (!row.ModelType.Equals(modelType, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Fallback Deployment 必须与主 Deployment 类型一致。");
+            if (row.FallbackDeploymentId is not Guid next) return;
+            currentId = next;
+        }
+        throw new InvalidOperationException("Model Deployment fallback 链超过允许深度。");
     }
 
     private static AiProviderConnectionSummary ToSummary(AiProviderConnectionEntity x)

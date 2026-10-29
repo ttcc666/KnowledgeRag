@@ -28,12 +28,16 @@ public sealed record RagProfileUpdate(
     string? PlannerModel,
     string? AnswerModel,
     string? ReviewerModel,
+    Guid? PlannerDeploymentId,
+    Guid? AnswerDeploymentId,
+    Guid? ReviewerDeploymentId,
+    Guid? RerankerDeploymentId,
     Guid? PromptProfileId,
     string? AgentMode,
     decimal MonthlyBudgetUsd,
     int DailyRunLimit);
 
-public sealed record ModelPriceUpdate(string Model, decimal InputCostPerMillionTokens, decimal OutputCostPerMillionTokens, bool IsActive = true);
+public sealed record ModelPriceUpdate(string Model, decimal InputCostPerMillionTokens, decimal OutputCostPerMillionTokens, bool IsActive = true, Guid? DeploymentId = null);
 public sealed record PromptProfileUpsert(Guid? Id, Guid? KnowledgeBaseId, string Name, string PlannerPrompt, string AnswerPrompt, string ReviewerPrompt, bool IsActive);
 public sealed record WebhookUpsert(Guid? Id, string Name, string Url, IReadOnlyList<string> EventTypes, string? Secret, bool IsActive, string? Provider = null);
 public sealed record EvaluationDatasetCreate(Guid KnowledgeBaseId, string Name, string? Description);
@@ -43,7 +47,8 @@ public sealed class GovernanceService(
     AppDbContext db,
     KnowledgeBaseAccessService knowledgeBaseAccess,
     TenantAccessService tenantAccess,
-    RagRuntimeProfileService runtimeProfiles)
+    RagRuntimeProfileService runtimeProfiles,
+    TenantAiProviderService tenantAiProviders)
 {
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
 
@@ -83,6 +88,10 @@ public sealed class GovernanceService(
             PlannerModel = resolved.PlannerModel,
             AnswerModel = resolved.AnswerModel,
             ReviewerModel = resolved.ReviewerModel,
+            PlannerDeploymentId = resolved.PlannerEndpoint.DeploymentId,
+            AnswerDeploymentId = resolved.AnswerEndpoint.DeploymentId,
+            ReviewerDeploymentId = resolved.ReviewerEndpoint.DeploymentId,
+            RerankerDeploymentId = resolved.RerankerEndpoint?.DeploymentId,
             PromptProfileId = resolved.PromptProfileId,
             AgentMode = resolved.AgentMode,
             MonthlyBudgetUsd = resolved.MonthlyBudgetUsd,
@@ -105,15 +114,36 @@ public sealed class GovernanceService(
         entity.EnableReviewer = request.EnableReviewer;
         entity.ReviewerMaxRetries = Math.Clamp(request.ReviewerMaxRetries, 0, 3);
         entity.ReviewerMinConfidence = Math.Clamp(request.ReviewerMinConfidence, 0, 1);
+        var tenantId = await db.KnowledgeBases.AsNoTracking().Where(x => x.Id == knowledgeBaseId).Select(x => x.TenantId).SingleAsync(ct);
+        if (request.PlannerDeploymentId is Guid plannerDeploymentId)
+            _ = await tenantAiProviders.ResolveEndpointWithFallbackAsync(tenantId, plannerDeploymentId, AiModelTypes.Chat, ct);
+        if (request.AnswerDeploymentId is Guid answerDeploymentId)
+            _ = await tenantAiProviders.ResolveEndpointWithFallbackAsync(tenantId, answerDeploymentId, AiModelTypes.Chat, ct);
+        if (request.ReviewerDeploymentId is Guid reviewerDeploymentId)
+            _ = await tenantAiProviders.ResolveEndpointWithFallbackAsync(tenantId, reviewerDeploymentId, AiModelTypes.Chat, ct);
+        if (request.RerankerDeploymentId is Guid rerankerDeploymentId)
+            _ = await tenantAiProviders.ResolveEndpointWithFallbackAsync(tenantId, rerankerDeploymentId, AiModelTypes.Rerank, ct);
         entity.PlannerModel = request.PlannerModel?.Trim() ?? string.Empty;
         entity.AnswerModel = request.AnswerModel?.Trim() ?? string.Empty;
         entity.ReviewerModel = request.ReviewerModel?.Trim() ?? string.Empty;
+        entity.PlannerDeploymentId = request.PlannerDeploymentId;
+        entity.AnswerDeploymentId = request.AnswerDeploymentId;
+        entity.ReviewerDeploymentId = request.ReviewerDeploymentId;
+        entity.RerankerDeploymentId = request.RerankerDeploymentId;
         entity.PromptProfileId = request.PromptProfileId;
         entity.AgentMode = string.IsNullOrWhiteSpace(request.AgentMode) ? "specialists" : request.AgentMode.Trim();
         entity.MonthlyBudgetUsd = Math.Max(0, request.MonthlyBudgetUsd);
         entity.DailyRunLimit = Math.Max(0, request.DailyRunLimit);
         entity.UpdatedByUserId = actor.UserId;
         entity.UpdatedAt = DateTimeOffset.UtcNow;
+        db.AuditLogs.Add(new AuditLogEntity
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, UserId = actor.UserId, ApiKeyId = actor.ApiKeyId,
+            Action = "rag.profile.routing.saved", ResourceType = "rag-profile", ResourceId = knowledgeBaseId.ToString(),
+            Summary = "Updated RAG role deployment routing.",
+            DetailsJson = JsonSerializer.Serialize(new { entity.PlannerDeploymentId, entity.AnswerDeploymentId, entity.ReviewerDeploymentId, entity.RerankerDeploymentId }, WebJson),
+            StatusCode = 200, CreatedAt = entity.UpdatedAt
+        });
         await db.SaveChangesAsync(ct);
         return entity;
     }
@@ -141,15 +171,37 @@ public sealed class GovernanceService(
     public async Task<ModelPriceEntity> SaveModelPriceAsync(ActorContext actor, Guid tenantId, ModelPriceUpdate request, CancellationToken ct = default)
     {
         await tenantAccess.RequireAsync(actor, tenantId, TenantRole.Admin, ct);
-        if (string.IsNullOrWhiteSpace(request.Model)) throw new InvalidOperationException("模型名称不能为空。");
-        var model = request.Model.Trim();
-        var entity = await db.Set<ModelPriceEntity>().SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Model == model, ct)
-                     ?? new ModelPriceEntity { Id = Guid.NewGuid(), TenantId = tenantId, Model = model };
+        string model;
+        if (request.DeploymentId is Guid deploymentId)
+        {
+            var deployment = await db.AiModelDeployments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deploymentId && x.TenantId == tenantId, ct)
+                ?? throw new InvalidOperationException("Pricing Deployment 不存在或不属于当前租户。");
+            model = deployment.RemoteModelName;
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(request.Model)) throw new InvalidOperationException("模型名称不能为空。");
+            model = request.Model.Trim();
+        }
+        var entity = request.DeploymentId is Guid priceDeploymentId
+            ? await db.ModelPrices.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.DeploymentId == priceDeploymentId, ct)
+            : await db.ModelPrices.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.DeploymentId == null && x.Model == model, ct);
+        entity ??= new ModelPriceEntity { Id = Guid.NewGuid(), TenantId = tenantId };
         if (db.Entry(entity).State == EntityState.Detached) db.Add(entity);
+        entity.DeploymentId = request.DeploymentId;
+        entity.Model = model;
         entity.InputCostPerMillionTokens = Math.Max(0, request.InputCostPerMillionTokens);
         entity.OutputCostPerMillionTokens = Math.Max(0, request.OutputCostPerMillionTokens);
         entity.IsActive = request.IsActive;
         entity.UpdatedAt = DateTimeOffset.UtcNow;
+        db.AuditLogs.Add(new AuditLogEntity
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, UserId = actor.UserId, ApiKeyId = actor.ApiKeyId,
+            Action = "ai.price.saved", ResourceType = "model-price", ResourceId = entity.Id.ToString(),
+            Summary = request.DeploymentId.HasValue ? "Updated deployment-level AI price." : "Updated legacy model-name AI price.",
+            DetailsJson = JsonSerializer.Serialize(new { entity.DeploymentId, entity.Model, entity.IsActive }, WebJson),
+            StatusCode = 200, CreatedAt = entity.UpdatedAt
+        });
         await db.SaveChangesAsync(ct);
         return entity;
     }

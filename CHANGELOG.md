@@ -18,6 +18,8 @@
 
 ### Added
 
+- 新增 **Deployment-level AI Routing Governance**：KB RAG Profile 可将 Planner / Answer / Reviewer / Reranker 显式绑定到租户 Model Deployment；Deployment 支持同类型显式 fallback、持久化健康状态与安全 health check，运行开始时一次性解析实际 endpoint snapshot。
+- 新增 deployment-first AI pricing / usage identity：Model Price 可绑定 Deployment，Budget Reservation 与 usage ledger 记录实际 resolved DeploymentId / ProviderType；同名模型跨 Provider 可独立计价，旧 model-name price 继续作为兼容 fallback。
 - 新增 **KB-scoped Embedding Index Generation**：按知识库保存不可变 Embedding endpoint/model/dimension 快照，pgvector / Qdrant 以 generation 隔离物理向量空间，BM25 / PostgreSQL FTS 同步按 generation 过滤；重建期间查询继续固定旧 active generation，只有全部文档 staging 完成且源文档 manifest 未变化时才原子切换。
 - 新增 **Tenant AI Provider Control Plane**：租户可管理 OpenAI-compatible Provider Connection、加密 Credential、Chat / Embedding / Rerank Model Deployment 与租户默认模型；Chat/Planner/Answer/Reviewer 运行时按租户解析 Provider，未配置租户 Provider 时保持平台级 AI fallback。
 - 新增租户 AI Provider 管理界面与连接验证；Embedding Deployment 本阶段仅作为后续版本化 Reindex 的目标配置，现有 active vector space 不会因租户默认值变化而直接切换。
@@ -47,6 +49,7 @@
 
 ### Changed
 
+- RAG Agent 不再用一个共享 ChatEndpoint 搭配 raw model string 解释所有角色；Planner / Answer / Reviewer / Specialist 现在使用各自已解析 Deployment endpoint，显式绑定不可用时只沿配置好的 fallback 链选择，不在运行中动态漂移到其他 Provider。
 - 租户默认 Embedding Deployment 现在只作为下一次 KB Reindex 的目标；修改默认值不会直接改变当前检索向量空间。活动/构建中的 generation 会固定 provider/model/dimensions 快照，并阻止破坏该快照的 Provider Base URL / disable 操作；凭据轮换仍允许。
 - Tenant-managed AI Provider Base URL 强制使用公网 HTTPS，并复用无 ambient proxy、无 redirect、DNS 公网地址校验与 ConnectCallback pinning 的 SSRF 安全连接策略；Provider Credential 使用独立 purpose 的 AES-GCM 加密且 API 永不返回明文。
 - Chat 主界面继续使用 assistant-ui 官方 registry `Thread` / `ThreadList` / `MarkdownText` / `Sources`；TanStack Query + SSE 作为 External Store 数据适配层，安全的 Agent Workflow 运行状态现在属于当前 assistant turn 并在消息流内呈现，深度 Evidence Panel 仍保持独立侧栏，不展示 Chain of Thought。

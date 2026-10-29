@@ -83,6 +83,9 @@ public static class TenantEndpoints
             return Results.NoContent();
         });
 
+        group.MapPost("/{tenantId:guid}/ai/deployments/{deploymentId:guid}/health", async (Guid tenantId, Guid deploymentId, ClaimsPrincipal principal, TenantAiProviderService service, CancellationToken ct) =>
+            Results.Ok(await service.TestDeploymentHealthAsync(HttpActorContext.From(principal), tenantId, deploymentId, ct)));
+
         group.MapGet("/{tenantId:guid}/ai/defaults", async (Guid tenantId, ClaimsPrincipal principal, TenantAiProviderService service, CancellationToken ct) =>
             Results.Ok(await service.GetDefaultsAsync(HttpActorContext.From(principal), tenantId, ct)));
 

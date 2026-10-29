@@ -37,8 +37,23 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                     b.Property<int?>("EmbeddingDimensions")
                         .HasColumnType("INTEGER");
 
+                    b.Property<Guid?>("FallbackDeploymentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("HealthStatus")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("IsEnabled")
                         .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("LastHealthCheckedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastHealthError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("ModelType")
                         .IsRequired()
@@ -59,6 +74,10 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ConnectionId");
+
+                    b.HasIndex("FallbackDeploymentId");
+
+                    b.HasIndex("TenantId", "HealthStatus");
 
                     b.HasIndex("TenantId", "ConnectionId", "DisplayName")
                         .IsUnique();
@@ -762,6 +781,9 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("AnswerDeploymentId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("AnswerModel")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -785,6 +807,9 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                     b.Property<int>("MultiQueryTopK")
                         .HasColumnType("INTEGER");
 
+                    b.Property<Guid?>("PlannerDeploymentId")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("PlannerMaxQueries")
                         .HasColumnType("INTEGER");
 
@@ -794,6 +819,12 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<Guid?>("PromptProfileId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("RerankerDeploymentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ReviewerDeploymentId")
                         .HasColumnType("TEXT");
 
                     b.Property<int>("ReviewerMaxRetries")
@@ -815,6 +846,14 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
 
                     b.HasKey("KnowledgeBaseId");
 
+                    b.HasIndex("AnswerDeploymentId");
+
+                    b.HasIndex("PlannerDeploymentId");
+
+                    b.HasIndex("RerankerDeploymentId");
+
+                    b.HasIndex("ReviewerDeploymentId");
+
                     b.ToTable("KnowledgeBaseRagProfiles", (string)null);
                 });
 
@@ -822,6 +861,9 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DeploymentId")
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("InputCostPerMillionTokens")
@@ -846,8 +888,12 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId", "Model")
+                    b.HasIndex("DeploymentId");
+
+                    b.HasIndex("TenantId", "DeploymentId")
                         .IsUnique();
+
+                    b.HasIndex("TenantId", "Model");
 
                     b.ToTable("ModelPrices", (string)null);
                 });
@@ -920,6 +966,9 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("AnswerDeploymentId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("AnswerModel")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -972,6 +1021,8 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AnswerDeploymentId");
 
                     b.HasIndex("ConversationId");
 
@@ -1233,6 +1284,11 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("KnowledgeRag.Domain.Entities.AiModelDeploymentEntity", null)
+                        .WithMany()
+                        .HasForeignKey("FallbackDeploymentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("KnowledgeRag.Domain.Entities.TenantEntity", null)
                         .WithMany()
                         .HasForeignKey("TenantId")
@@ -1428,15 +1484,40 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("KnowledgeRag.Domain.Entities.KnowledgeBaseRagProfileEntity", b =>
                 {
+                    b.HasOne("KnowledgeRag.Domain.Entities.AiModelDeploymentEntity", null)
+                        .WithMany()
+                        .HasForeignKey("AnswerDeploymentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("KnowledgeRag.Domain.Entities.KnowledgeBaseEntity", null)
                         .WithOne()
                         .HasForeignKey("KnowledgeRag.Domain.Entities.KnowledgeBaseRagProfileEntity", "KnowledgeBaseId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("KnowledgeRag.Domain.Entities.AiModelDeploymentEntity", null)
+                        .WithMany()
+                        .HasForeignKey("PlannerDeploymentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("KnowledgeRag.Domain.Entities.AiModelDeploymentEntity", null)
+                        .WithMany()
+                        .HasForeignKey("RerankerDeploymentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("KnowledgeRag.Domain.Entities.AiModelDeploymentEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ReviewerDeploymentId")
+                        .OnDelete(DeleteBehavior.SetNull);
                 });
 
             modelBuilder.Entity("KnowledgeRag.Domain.Entities.ModelPriceEntity", b =>
                 {
+                    b.HasOne("KnowledgeRag.Domain.Entities.AiModelDeploymentEntity", null)
+                        .WithMany()
+                        .HasForeignKey("DeploymentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("KnowledgeRag.Domain.Entities.TenantEntity", null)
                         .WithMany()
                         .HasForeignKey("TenantId")
@@ -1460,6 +1541,11 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("KnowledgeRag.Domain.Entities.RagRunEntity", b =>
                 {
+                    b.HasOne("KnowledgeRag.Domain.Entities.AiModelDeploymentEntity", null)
+                        .WithMany()
+                        .HasForeignKey("AnswerDeploymentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("KnowledgeRag.Domain.Entities.ConversationEntity", null)
                         .WithMany()
                         .HasForeignKey("ConversationId")
