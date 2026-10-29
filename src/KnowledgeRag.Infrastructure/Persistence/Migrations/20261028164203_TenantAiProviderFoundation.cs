@@ -11,12 +11,17 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // Guid columns must match the provider-specific principal key type for foreign keys.
+            var guidColumnType = migrationBuilder.ActiveProvider.Contains("Npgsql", StringComparison.Ordinal)
+                ? "uuid"
+                : "TEXT";
+
             migrationBuilder.CreateTable(
                 name: "AiProviderConnections",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: null, nullable: false),
-                    TenantId = table.Column<Guid>(type: null, nullable: false),
+                    Id = table.Column<Guid>(type: guidColumnType, nullable: false),
+                    TenantId = table.Column<Guid>(type: guidColumnType, nullable: false),
                     Name = table.Column<string>(type: null, maxLength: 200, nullable: false),
                     ProviderType = table.Column<string>(type: null, maxLength: 64, nullable: false),
                     BaseUrl = table.Column<string>(type: null, maxLength: 2000, nullable: false),
@@ -24,7 +29,7 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                     ConfigJson = table.Column<string>(type: null, maxLength: 8000, nullable: false),
                     IsEnabled = table.Column<bool>(type: null, nullable: false),
                     Revision = table.Column<int>(type: null, nullable: false),
-                    CreatedByUserId = table.Column<Guid>(type: null, nullable: false),
+                    CreatedByUserId = table.Column<Guid>(type: guidColumnType, nullable: false),
                     CreatedAt = table.Column<DateTimeOffset>(type: null, nullable: false),
                     UpdatedAt = table.Column<DateTimeOffset>(type: null, nullable: false)
                 },
@@ -49,9 +54,9 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                 name: "AiModelDeployments",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: null, nullable: false),
-                    TenantId = table.Column<Guid>(type: null, nullable: false),
-                    ConnectionId = table.Column<Guid>(type: null, nullable: false),
+                    Id = table.Column<Guid>(type: guidColumnType, nullable: false),
+                    TenantId = table.Column<Guid>(type: guidColumnType, nullable: false),
+                    ConnectionId = table.Column<Guid>(type: guidColumnType, nullable: false),
                     DisplayName = table.Column<string>(type: null, maxLength: 200, nullable: false),
                     RemoteModelName = table.Column<string>(type: null, maxLength: 200, nullable: false),
                     ModelType = table.Column<string>(type: null, maxLength: 32, nullable: false),
@@ -81,11 +86,11 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                 name: "TenantAiDefaults",
                 columns: table => new
                 {
-                    TenantId = table.Column<Guid>(type: null, nullable: false),
-                    DefaultChatDeploymentId = table.Column<Guid>(type: null, nullable: true),
-                    DefaultEmbeddingDeploymentId = table.Column<Guid>(type: null, nullable: true),
-                    DefaultRerankerDeploymentId = table.Column<Guid>(type: null, nullable: true),
-                    UpdatedByUserId = table.Column<Guid>(type: null, nullable: false),
+                    TenantId = table.Column<Guid>(type: guidColumnType, nullable: false),
+                    DefaultChatDeploymentId = table.Column<Guid>(type: guidColumnType, nullable: true),
+                    DefaultEmbeddingDeploymentId = table.Column<Guid>(type: guidColumnType, nullable: true),
+                    DefaultRerankerDeploymentId = table.Column<Guid>(type: guidColumnType, nullable: true),
+                    UpdatedByUserId = table.Column<Guid>(type: guidColumnType, nullable: false),
                     UpdatedAt = table.Column<DateTimeOffset>(type: null, nullable: false)
                 },
                 constraints: table =>
