@@ -60,7 +60,7 @@ React + assistant-ui
                             ├─ resolve KB RAG Profile / model / budget snapshot
                             └─ RagAgentService
                                  └─ Microsoft Agent Framework Workflow
-                                      Planner
+                                      Planner (if enabled; otherwise original query)
                                         ↓
                                       MultiQuerySearchService
                                         ↓
@@ -78,7 +78,7 @@ React + assistant-ui
                                         ↓
                                       FinalAnswerPolicy / Citation Gate
                                         ↓
-                                      persist accepted answer + cited Sources + usage
+                                      persist final validated answer + cited Sources + usage
 
 SSE progress events update the Timeline during execution; final answer delta is
 emitted only after workflow review and the deterministic Citation Gate.
@@ -87,6 +87,11 @@ emitted only after workflow review and the deterministic Citation Gate.
 Search and Governance use their own authenticated Endpoints and services; they do not
 pass through the Chat Agent Workflow. Retrieval ranking, authorization and citation
 validation remain code-controlled.
+
+When Rag.EnableAgentWorkflow=false, RagAgentService uses the legacy-compatible path:
+one KnowledgeSearchService retrieval followed by answer generation, bypassing the full
+Planner / Reviewer-Repair workflow. Agent roles use the request-scoped resolved Tenant
+Deployment or platform AI endpoint snapshot.
 
 异步文档处理：
 
