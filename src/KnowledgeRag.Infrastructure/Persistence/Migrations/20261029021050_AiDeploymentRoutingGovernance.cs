@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -11,6 +11,8 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            var guidColumnType = ActiveProvider.Contains("Npgsql", StringComparison.Ordinal) ? "uuid" : "TEXT";
+
             migrationBuilder.DropIndex(
                 name: "IX_ModelPrices_TenantId_Model",
                 table: "ModelPrices");
@@ -18,63 +20,63 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
             migrationBuilder.AddColumn<Guid>(
                 name: "AnswerDeploymentId",
                 table: "RagRuns",
-                type: "TEXT",
+                type: guidColumnType,
                 nullable: true);
 
             migrationBuilder.AddColumn<Guid>(
                 name: "DeploymentId",
                 table: "ModelPrices",
-                type: "TEXT",
+                type: guidColumnType,
                 nullable: true);
 
             migrationBuilder.AddColumn<Guid>(
                 name: "AnswerDeploymentId",
                 table: "KnowledgeBaseRagProfiles",
-                type: "TEXT",
+                type: guidColumnType,
                 nullable: true);
 
             migrationBuilder.AddColumn<Guid>(
                 name: "PlannerDeploymentId",
                 table: "KnowledgeBaseRagProfiles",
-                type: "TEXT",
+                type: guidColumnType,
                 nullable: true);
 
             migrationBuilder.AddColumn<Guid>(
                 name: "RerankerDeploymentId",
                 table: "KnowledgeBaseRagProfiles",
-                type: "TEXT",
+                type: guidColumnType,
                 nullable: true);
 
             migrationBuilder.AddColumn<Guid>(
                 name: "ReviewerDeploymentId",
                 table: "KnowledgeBaseRagProfiles",
-                type: "TEXT",
+                type: guidColumnType,
                 nullable: true);
 
             migrationBuilder.AddColumn<Guid>(
                 name: "FallbackDeploymentId",
                 table: "AiModelDeployments",
-                type: "TEXT",
+                type: guidColumnType,
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
                 name: "HealthStatus",
                 table: "AiModelDeployments",
-                type: "TEXT",
+                type: null,
                 maxLength: 32,
                 nullable: false,
-                defaultValue: "");
+                defaultValue: "unknown");
 
             migrationBuilder.AddColumn<DateTimeOffset>(
                 name: "LastHealthCheckedAt",
                 table: "AiModelDeployments",
-                type: "TEXT",
+                type: null,
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
                 name: "LastHealthError",
                 table: "AiModelDeployments",
-                type: "TEXT",
+                type: null,
                 maxLength: 1000,
                 nullable: true);
 
@@ -175,7 +177,7 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                 column: "DeploymentId",
                 principalTable: "AiModelDeployments",
                 principalColumn: "Id",
-                onDelete: ReferentialAction.SetNull);
+                onDelete: ReferentialAction.Restrict);
 
             migrationBuilder.AddForeignKey(
                 name: "FK_RagRuns_AiModelDeployments_AnswerDeploymentId",
@@ -183,7 +185,7 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                 column: "AnswerDeploymentId",
                 principalTable: "AiModelDeployments",
                 principalColumn: "Id",
-                onDelete: ReferentialAction.SetNull);
+                onDelete: ReferentialAction.Restrict);
         }
 
         /// <inheritdoc />

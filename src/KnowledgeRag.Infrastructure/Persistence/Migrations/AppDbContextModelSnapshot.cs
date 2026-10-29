@@ -1516,7 +1516,7 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                     b.HasOne("KnowledgeRag.Domain.Entities.AiModelDeploymentEntity", null)
                         .WithMany()
                         .HasForeignKey("DeploymentId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("KnowledgeRag.Domain.Entities.TenantEntity", null)
                         .WithMany()
@@ -1544,7 +1544,7 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                     b.HasOne("KnowledgeRag.Domain.Entities.AiModelDeploymentEntity", null)
                         .WithMany()
                         .HasForeignKey("AnswerDeploymentId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("KnowledgeRag.Domain.Entities.ConversationEntity", null)
                         .WithMany()

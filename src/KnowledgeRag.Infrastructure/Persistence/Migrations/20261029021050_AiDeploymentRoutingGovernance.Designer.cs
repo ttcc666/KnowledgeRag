@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace KnowledgeRag.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20261029015437_AiDeploymentRoutingGovernance")]
+    [Migration("20261029021050_AiDeploymentRoutingGovernance")]
     partial class AiDeploymentRoutingGovernance
     {
         /// <inheritdoc />
@@ -1519,7 +1519,7 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                     b.HasOne("KnowledgeRag.Domain.Entities.AiModelDeploymentEntity", null)
                         .WithMany()
                         .HasForeignKey("DeploymentId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("KnowledgeRag.Domain.Entities.TenantEntity", null)
                         .WithMany()
@@ -1547,7 +1547,7 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                     b.HasOne("KnowledgeRag.Domain.Entities.AiModelDeploymentEntity", null)
                         .WithMany()
                         .HasForeignKey("AnswerDeploymentId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("KnowledgeRag.Domain.Entities.ConversationEntity", null)
                         .WithMany()

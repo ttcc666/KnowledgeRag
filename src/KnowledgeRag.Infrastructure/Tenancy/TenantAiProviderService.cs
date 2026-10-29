@@ -144,15 +144,22 @@ public sealed class TenantAiProviderService(
         {
             entity = await db.Set<AiModelDeploymentEntity>().SingleOrDefaultAsync(x => x.Id == id && x.TenantId == tenantId, ct)
                 ?? throw new KeyNotFoundException("Model Deployment 不存在。");
+            var healthTargetChanged = entity.ConnectionId != request.ConnectionId ||
+                                      !entity.RemoteModelName.Equals(remoteModel, StringComparison.Ordinal) ||
+                                      !entity.ModelType.Equals(modelType, StringComparison.OrdinalIgnoreCase) ||
+                                      entity.IsEnabled != request.IsEnabled;
             entity.ConnectionId = request.ConnectionId;
             entity.DisplayName = displayName;
             entity.RemoteModelName = remoteModel;
             entity.ModelType = modelType;
             entity.EmbeddingDimensions = request.EmbeddingDimensions;
             entity.FallbackDeploymentId = request.FallbackDeploymentId;
-            entity.HealthStatus = AiDeploymentHealthStatuses.Unknown;
-            entity.LastHealthCheckedAt = null;
-            entity.LastHealthError = null;
+            if (healthTargetChanged)
+            {
+                entity.HealthStatus = AiDeploymentHealthStatuses.Unknown;
+                entity.LastHealthCheckedAt = null;
+                entity.LastHealthError = null;
+            }
             entity.IsEnabled = request.IsEnabled;
             entity.UpdatedAt = now;
         }
@@ -194,6 +201,10 @@ public sealed class TenantAiProviderService(
         if (await db.KnowledgeBaseRagProfiles.AnyAsync(x => x.PlannerDeploymentId == deploymentId || x.AnswerDeploymentId == deploymentId ||
             x.ReviewerDeploymentId == deploymentId || x.RerankerDeploymentId == deploymentId, ct))
             throw new InvalidOperationException("该 Deployment 正在被知识库 RAG Profile 使用，请先修改角色路由。");
+        if (await db.ModelPrices.AnyAsync(x => x.DeploymentId == deploymentId, ct))
+            throw new InvalidOperationException("该 Deployment 已绑定价格记录；为保持成本身份不可变，请停用而不是删除。");
+        if (await db.RagRuns.AnyAsync(x => x.AnswerDeploymentId == deploymentId, ct))
+            throw new InvalidOperationException("该 Deployment 已出现在历史 RAG Run；为保持运行账本身份不可变，请停用而不是删除。");
         db.Remove(entity);
         await db.SaveChangesAsync(ct);
     }

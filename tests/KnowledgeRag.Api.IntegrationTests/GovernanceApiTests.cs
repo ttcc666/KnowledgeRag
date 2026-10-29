@@ -1,7 +1,10 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using KnowledgeRag.Domain.Entities;
 using KnowledgeRag.Infrastructure.Governance;
+using KnowledgeRag.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -79,6 +82,120 @@ public sealed class GovernanceApiTests : IClassFixture<ApiFactory>
             Assert.Equal(12.5m, estimatedCost);
         }
 
+        // Deployment-first routing/pricing: one unhealthy primary deterministically resolves to its explicit fallback.
+        var connectionResponse = await client.PostAsJsonAsync($"/api/tenants/{tenantId}/ai/connections", new
+        {
+            name = "Governance Provider",
+            providerType = "openai-compatible",
+            baseUrl = "https://api.openai.com/v1",
+            credential = "governance-test-secret",
+            isEnabled = true
+        });
+        connectionResponse.EnsureSuccessStatusCode();
+        var connectionId = (await connectionResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        var fallbackResponse = await client.PostAsJsonAsync($"/api/tenants/{tenantId}/ai/deployments", new
+        {
+            connectionId,
+            displayName = "Fallback Chat",
+            remoteModelName = "gpt-fallback",
+            modelType = "chat",
+            embeddingDimensions = (int?)null,
+            isEnabled = true,
+            fallbackDeploymentId = (Guid?)null
+        });
+        fallbackResponse.EnsureSuccessStatusCode();
+        var fallbackDeploymentId = (await fallbackResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        var primaryResponse = await client.PostAsJsonAsync($"/api/tenants/{tenantId}/ai/deployments", new
+        {
+            connectionId,
+            displayName = "Primary Chat",
+            remoteModelName = "gpt-primary",
+            modelType = "chat",
+            embeddingDimensions = (int?)null,
+            isEnabled = true,
+            fallbackDeploymentId
+        });
+        primaryResponse.EnsureSuccessStatusCode();
+        var primaryDeploymentId = (await primaryResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        var selfFallback = await client.PostAsJsonAsync($"/api/tenants/{tenantId}/ai/deployments", new
+        {
+            id = primaryDeploymentId,
+            connectionId,
+            displayName = "Primary Chat",
+            remoteModelName = "gpt-primary",
+            modelType = "chat",
+            embeddingDimensions = (int?)null,
+            isEnabled = true,
+            fallbackDeploymentId = primaryDeploymentId
+        });
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, selfFallback.StatusCode);
+
+        var saveDeploymentProfile = await client.PutAsJsonAsync($"/api/governance/knowledge-bases/{knowledgeBaseId}/rag-profile", new
+        {
+            enablePlanner = true,
+            plannerMaxQueries = 4,
+            multiQueryTopK = 8,
+            maxMergedEvidence = 12,
+            enableReviewer = true,
+            reviewerMaxRetries = 2,
+            reviewerMinConfidence = .8,
+            plannerModel = "",
+            answerModel = "",
+            reviewerModel = "",
+            plannerDeploymentId = primaryDeploymentId,
+            answerDeploymentId = primaryDeploymentId,
+            reviewerDeploymentId = fallbackDeploymentId,
+            rerankerDeploymentId = (Guid?)null,
+            promptProfileId = (Guid?)null,
+            agentMode = "specialists",
+            monthlyBudgetUsd = 15.5m,
+            dailyRunLimit = 100
+        });
+        saveDeploymentProfile.EnsureSuccessStatusCode();
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var primary = await db.AiModelDeployments.SingleAsync(x => x.Id == primaryDeploymentId);
+            primary.HealthStatus = AiDeploymentHealthStatuses.Unhealthy;
+            primary.LastHealthCheckedAt = DateTimeOffset.UtcNow;
+            primary.LastHealthError = "synthetic regression health failure";
+            await db.SaveChangesAsync();
+        }
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var runtimeProfiles = scope.ServiceProvider.GetRequiredService<RagRuntimeProfileService>();
+            var routed = await runtimeProfiles.ResolveAsync(knowledgeBaseId);
+            Assert.Equal(fallbackDeploymentId, routed.PlannerEndpoint.DeploymentId);
+            Assert.Equal(fallbackDeploymentId, routed.AnswerEndpoint.DeploymentId);
+            Assert.Equal("gpt-fallback", routed.AnswerModel);
+            Assert.Equal(fallbackDeploymentId, routed.ReviewerEndpoint.DeploymentId);
+        }
+
+        var deploymentPrice = await client.PutAsJsonAsync($"/api/governance/model-prices?tenantId={tenantId}", new
+        {
+            model = "",
+            deploymentId = fallbackDeploymentId,
+            inputCostPerMillionTokens = 7m,
+            outputCostPerMillionTokens = 13m,
+            isActive = true
+        });
+        deploymentPrice.EnsureSuccessStatusCode();
+        var deploymentPriceJson = await deploymentPrice.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(fallbackDeploymentId, deploymentPriceJson.GetProperty("deploymentId").GetGuid());
+        Assert.Equal("gpt-fallback", deploymentPriceJson.GetProperty("model").GetString());
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var runtimeProfiles = scope.ServiceProvider.GetRequiredService<RagRuntimeProfileService>();
+            var deploymentCost = await runtimeProfiles.EstimateCostAsync(tenantId, "gpt-fallback", fallbackDeploymentId, 1_000_000, 1_000_000);
+            Assert.Equal(20m, deploymentCost);
+        }
+
         var savePrompt = await client.PostAsJsonAsync($"/api/governance/prompts?tenantId={tenantId}", new
         {
             id = (Guid?)null,
@@ -131,7 +248,9 @@ public sealed class GovernanceApiTests : IClassFixture<ApiFactory>
         Assert.Single(cases.EnumerateArray());
 
         var audit = await client.GetFromJsonAsync<JsonElement>($"/api/governance/audit?tenantId={tenantId}");
-        Assert.True(audit.GetArrayLength() >= 4);
+        Assert.True(audit.GetArrayLength() >= 7);
         Assert.Contains(audit.EnumerateArray(), x => x.GetProperty("resourceType").GetString() == "webhook");
+        Assert.Contains(audit.EnumerateArray(), x => x.GetProperty("action").GetString() == "rag.profile.routing.saved");
+        Assert.Contains(audit.EnumerateArray(), x => x.GetProperty("action").GetString() == "ai.price.saved");
     }
 }

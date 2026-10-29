@@ -263,7 +263,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasOne<TenantEntity>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne<KnowledgeBaseEntity>().WithMany().HasForeignKey(x => x.KnowledgeBaseId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne<ConversationEntity>().WithMany().HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.SetNull);
-            entity.HasOne<AiModelDeploymentEntity>().WithMany().HasForeignKey(x => x.AnswerDeploymentId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<AiModelDeploymentEntity>().WithMany().HasForeignKey(x => x.AnswerDeploymentId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<ModelPriceEntity>(entity =>
@@ -274,7 +274,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasIndex(x => new { x.TenantId, x.Model });
             entity.HasIndex(x => new { x.TenantId, x.DeploymentId }).IsUnique();
             entity.HasOne<TenantEntity>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
-            entity.HasOne<AiModelDeploymentEntity>().WithMany().HasForeignKey(x => x.DeploymentId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<AiModelDeploymentEntity>().WithMany().HasForeignKey(x => x.DeploymentId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<AuditLogEntity>(entity =>
