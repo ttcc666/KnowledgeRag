@@ -251,6 +251,7 @@ public sealed class KnowledgeIngestionService(
             await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))
             {
                 var knowledgeBase = await db.KnowledgeBases.SingleAsync(x => x.Id == request.KnowledgeBaseId, cancellationToken);
+                await db.Entry(knowledgeBase).ReloadAsync(cancellationToken);
                 if (knowledgeBase.ActiveIndexGenerationId != indexGenerationId)
                     throw new ActiveIndexGenerationChangedException();
 
@@ -595,6 +596,7 @@ public sealed class KnowledgeIngestionService(
     }
 
     private sealed class DocumentProcessingCancelledException : Exception;
+    private sealed class ActiveIndexGenerationChangedException : Exception;
 }
 
 public sealed record DocumentDownload(Stream Stream, string ContentType, string FileName);

@@ -8,6 +8,29 @@ export interface AuthResponse { accessToken: string; expiresAt: string; refreshT
 export interface TenantSummary { id: string; name: string; slug: string; role: TenantRole; createdAt: string; updatedAt: string }
 export interface TenantMember { id: string; email: string; displayName: string; role: TenantRole; addedAt: string }
 export interface KnowledgeBaseSummary { id: string; tenantId: string; name: string; description?: string | null; role: KnowledgeBaseRole; createdAt: string; updatedAt: string }
+export interface KnowledgeBaseIndexGenerationSummary {
+  knowledgeBaseId: string
+  activeIndexGenerationId: string
+  activeProviderType: string
+  activeModelName: string
+  activeDimensions: number
+  activeDeploymentDisplayName: string
+  activeIsTenantManaged: boolean
+  activeSince?: string | null
+  latestGenerationId?: string | null
+  latestStatus?: string | null
+  latestProviderType?: string | null
+  latestModelName?: string | null
+  latestDimensions?: number | null
+  latestDeploymentDisplayName?: string | null
+  latestIsTenantManaged?: boolean | null
+  expectedDocumentCount: number
+  completedDocumentCount: number
+  failedDocumentCount: number
+  failureReason?: string | null
+  latestCreatedAt?: string | null
+  isBuilding: boolean
+}
 export interface KnowledgeBaseMember { id: string; email: string; displayName: string; role: KnowledgeBaseRole; addedAt: string }
 export interface KnowledgeDocument { id: string; fileName: string; contentType: string; sizeBytes: number; chunkCount: number; sha256: string; status: DocumentStatus; lastError?: string | null; createdAt: string; updatedAt: string }
 export interface UploadResponse { documentId: string; fileName: string; chunkCount: number; sha256: string; status: DocumentStatus }

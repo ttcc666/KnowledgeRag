@@ -77,6 +77,8 @@ public sealed class KnowledgeBaseIndexGenerationService(
         CancellationToken cancellationToken = default)
     {
         await access.RequireAsync(actor, knowledgeBaseId, KnowledgeBaseRole.Editor, cancellationToken);
+        if (actor.IsApiKey || actor.UserId == Guid.Empty)
+            throw new UnauthorizedAccessException("索引重建必须由已登录用户发起；API Key 可以读取索引状态。");
         var target = await tenantAiProviderService.ResolveEmbeddingTargetAsync(knowledgeBaseId, cancellationToken);
         KnowledgeBaseIndexGenerationEntity generation;
         List<DocumentEntity> documents;
