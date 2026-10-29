@@ -73,7 +73,7 @@ public static class AiUsageEstimator
         var queryCalls = retrievalRounds * queriesPerRound;
 
         if (profile.EnablePlanner)
-            result.Add(ForEndpoint("planner", profile.PlannerEndpoint, 1, queryTokens + 192, 192));
+            result.Add(ForEndpoint("planner", CompatEndpoint(profile.PlannerEndpoint, profile.PlannerModel), 1, queryTokens + 192, 192));
 
         var embeddingEndpoint = profile.EmbeddingEndpoint?.Endpoint;
         result.Add(embeddingEndpoint is not null
@@ -98,18 +98,18 @@ public static class AiUsageEstimator
         }
 
         var answerCalls = 1 + (profile.EnableReviewer ? profile.ReviewerMaxRetries : 0);
-        result.Add(ForEndpoint("answer", profile.AnswerEndpoint, answerCalls,
+        result.Add(ForEndpoint("answer", CompatEndpoint(profile.AnswerEndpoint, profile.AnswerModel), answerCalls,
             answerCalls * (queryTokens + evidenceTokens + 256), answerCalls * 1200));
 
         if (profile.EnableReviewer)
         {
             var reviewCalls = profile.ReviewerMaxRetries + 1;
-            result.Add(ForEndpoint("reviewer", profile.ReviewerEndpoint, reviewCalls,
+            result.Add(ForEndpoint("reviewer", CompatEndpoint(profile.ReviewerEndpoint, profile.ReviewerModel), reviewCalls,
                 reviewCalls * (queryTokens + evidenceTokens + 1200), reviewCalls * 320));
         }
 
         if (!string.Equals(profile.AgentMode, "single", StringComparison.OrdinalIgnoreCase))
-            result.Add(ForEndpoint("specialist", profile.ReviewerEndpoint, 1,
+            result.Add(ForEndpoint("specialist", CompatEndpoint(profile.ReviewerEndpoint, profile.ReviewerModel), 1,
                 queryTokens + evidenceTokens + 256, 640));
 
         return result;
@@ -135,7 +135,7 @@ public static class AiUsageEstimator
 
         var plannerCalls = CountStarted(events, "QueryPlannerAgent", "agent.started");
         if (plannerCalls > 0)
-            result.Add(ForEndpoint("planner", profile.PlannerEndpoint, plannerCalls,
+            result.Add(ForEndpoint("planner", CompatEndpoint(profile.PlannerEndpoint, profile.PlannerModel), plannerCalls,
                 plannerCalls * (queryTokens + 192), plannerCalls * 192));
 
         var queryEvents = events.Where(x =>
@@ -178,22 +178,22 @@ public static class AiUsageEstimator
         if (answerCalls > 0)
         {
             var finalOutput = Math.Max(1, EstimateTokens(answer));
-            result.Add(ForEndpoint("answer", profile.AnswerEndpoint, answerCalls,
+            result.Add(ForEndpoint("answer", CompatEndpoint(profile.AnswerEndpoint, profile.AnswerModel), answerCalls,
                 answerCalls * (queryTokens + evidenceTokens + 256), answerCalls * finalOutput));
         }
 
         var reviewerCalls = CountStarted(events, "EvidenceReviewerAgent", "agent.started");
         if (reviewerCalls > 0)
-            result.Add(ForEndpoint("reviewer", profile.ReviewerEndpoint, reviewerCalls,
+            result.Add(ForEndpoint("reviewer", CompatEndpoint(profile.ReviewerEndpoint, profile.ReviewerModel), reviewerCalls,
                 reviewerCalls * (queryTokens + evidenceTokens + Math.Max(1, EstimateTokens(answer))), reviewerCalls * 320));
 
         var specialistCalls = events.Count(x => string.Equals(x.Type, "tool.started", StringComparison.OrdinalIgnoreCase));
         if (specialistCalls > 0)
-            result.Add(ForEndpoint("specialist", profile.ReviewerEndpoint, specialistCalls,
+            result.Add(ForEndpoint("specialist", CompatEndpoint(profile.ReviewerEndpoint, profile.ReviewerModel), specialistCalls,
                 specialistCalls * (queryTokens + evidenceTokens + 256), specialistCalls * 640));
 
         if (result.All(x => x.Operation != "answer") && !string.IsNullOrWhiteSpace(answer))
-            result.Add(ForEndpoint("answer", profile.AnswerEndpoint, 1,
+            result.Add(ForEndpoint("answer", CompatEndpoint(profile.AnswerEndpoint, profile.AnswerModel), 1,
                 queryTokens + evidenceTokens + 256, Math.Max(1, EstimateTokens(answer))));
 
         return result;
@@ -209,6 +209,12 @@ public static class AiUsageEstimator
         int inputTokens,
         int outputTokens)
         => new(operation, endpoint.Model, calls, inputTokens, outputTokens, true, endpoint.DeploymentId, endpoint.ProviderType);
+
+    private static ResolvedAiEndpoint CompatEndpoint(ResolvedAiEndpoint endpoint, string model)
+        => endpoint.DeploymentId is null && !string.IsNullOrWhiteSpace(model) &&
+           !string.Equals(endpoint.Model, model, StringComparison.Ordinal)
+            ? endpoint with { Model = model }
+            : endpoint;
 
     private static int CountStarted(IEnumerable<RagProgressEvent> events, string actor, string type)
         => events.Count(x => string.Equals(x.Actor, actor, StringComparison.Ordinal) &&
