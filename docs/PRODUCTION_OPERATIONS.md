@@ -98,9 +98,20 @@ AUTH_ALLOW_REGISTRATION=false
 AUTH_ACCESS_TOKEN_MINUTES=60
 AUTH_REFRESH_TOKEN_DAYS=30
 SECRET_PROTECTION_MASTER_KEY=<independent-strong-random-secret>
+# Optional during a controlled key rotation:
+SECRET_PROTECTION_PREVIOUS_MASTER_KEY_1=<previous-master-key>
+SECRET_PROTECTION_LEGACY_AUTH_SIGNING_KEY_1=<old-auth-key-used-by-legacy-ciphertext>
 ```
 
-生产中应显式设置 `SECRET_PROTECTION_MASTER_KEY`，不要依赖开发兼容逻辑回退到 `AUTH_SIGNING_KEY`。
+Production 启动会拒绝已知 SigningKey 占位值、缺失/过短的 MasterKey，以及 JWT SigningKey 与 MasterKey 相同的配置。MasterKey 必须由 Secret Store 注入，不能依赖开发兼容回退。
+
+### API request throttling
+
+- 默认全局限流为每个 API Key / 已认证用户 / 匿名 IP 每 60 秒 120 次。
+- 登录、注册和刷新令牌端点默认进一步限制为每个来源 IP 每 60 秒 10 次；此上限不会高于全局 `RateLimiting:PermitLimit`。
+- Compose 部署可通过 `RATE_LIMITING_PERMIT_LIMIT`、`RATE_LIMITING_AUTH_PERMIT_LIMIT` 与 `RATE_LIMITING_WINDOW_SECONDS` 调整。
+- 限流器使用单实例内存计数；多副本部署必须在 Ingress / API Gateway 配置共享限流，不能把应用内限流当作分布式配额。
+- Swagger UI 在 Development 默认开放，其他环境默认关闭；如生产排障必须启用，设置 `SWAGGER_ENABLED=true`，并在网络层限制可访问来源，结束后恢复关闭。
 
 ### Storage
 
@@ -324,17 +335,17 @@ CAP 的持久数据库状态位于 PostgreSQL，但 RabbitMQ 可能存在正在 
 影响：
 
 - JWT signing / validation。
-- Webhook Secret 的 AES-GCM encryption key 派生。
+- 旧 `enc:v1:` Webhook Secret 的解密兼容性（新写入改用独立 SecretProtection MasterKey）。
 
-直接更换会让旧 token 失效，并可能导致已有加密 Webhook Secret 无法解密。轮换流程见 [Webhook Automation](WEBHOOK_AUTOMATION.md)。
+直接更换会让旧 JWT access token 失效。旧 `enc:v1:` Webhook Secret 与曾回退到 Auth key 加密的 AI Credential 还需要旧 Auth key 解密；轮换前把旧值暂时加入 `SECRET_PROTECTION_LEGACY_AUTH_SIGNING_KEY_1`（必要时第二个槽位），重新录入/验证相关 Secret 后再移除。历史无版本前缀的明文 Webhook Secret 也必须通过更新 API 重新保存，才能迁移为加密值。轮换流程见 [Webhook Automation](WEBHOOK_AUTOMATION.md)。
 
 ### `SECRET_PROTECTION_MASTER_KEY`
 
-影响 Tenant-managed AI Provider Credential。
+影响 Tenant-managed AI Provider Credential 与新写入的 Webhook Secret；两者使用不同 purpose-derived key。
 
-如果该值为空，AI Credential 在开发兼容模式下回退到 Auth Signing Key；生产不推荐这样配置。
+如果该值为空，开发/测试兼容模式会回退到 Auth Signing Key；Production 启动会拒绝空值。
 
-直接更换 master key 会让已有 `enc:ai:v1:` Credential 无法解密。当前实现没有自动 key ring / re-encryption migration；轮换前必须设计受控迁移或重新保存 Provider Credential。
+轮换 MasterKey 时先把新值设置为 `SECRET_PROTECTION_MASTER_KEY`，把旧值加入 `SECRET_PROTECTION_PREVIOUS_MASTER_KEY_1`（需要时使用第二个槽位），确认已有 AI Credential 与 Webhook Secret 可解密后，逐项重新保存凭据并验证。只有确认旧密文均已用新密钥重新保存，才移除 previous key。当前没有自动批量重加密命令。
 
 ### S3 / RabbitMQ / PostgreSQL Credential
 

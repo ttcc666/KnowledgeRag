@@ -196,7 +196,7 @@ KB role 独立于 Tenant role：
 | 500 | 未处理的服务器异常；响应使用通用错误消息，详细异常写入服务端日志 |
 | 504 | Webhook test delivery 超时 |
 
-**409 / 429 注意事项：** 当前未发现全局的应用层 Rate Limiter，也未发现统一的 409 / 429 异常映射。不要假设预算耗尽必然返回 429，或所有冲突都返回 409；业务异常目前可能被映射为 400。反向代理、AI Provider 或 Webhook 接收方仍可能返回 429。
+**409 / 429 注意事项：** API 全局固定窗口限流默认按 API Key、已认证用户或匿名 IP 分区，每 60 秒最多 120 次；登录、注册、刷新令牌接口另有更严格的每来源 IP 限流，默认每 60 秒 10 次（同时受全局上限约束）。可配置 RateLimiting:PermitLimit、RateLimiting:AuthPermitLimit 与 RateLimiting:WindowSeconds。该限流是单实例内存计数，多实例需在 Gateway 层统一限流。业务预算拒绝和其他业务异常不是统一的 429 契约，部分业务异常仍可能映射为 400；409 也不是所有冲突的统一映射。反向代理、AI Provider 或 Webhook 接收方仍可能返回 429。
 
 ## 5. 授权失败排查
 

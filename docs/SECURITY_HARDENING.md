@@ -12,12 +12,12 @@
 
 | 优先级 | 项目 | 当前观察 / 建议 |
 |---|---|---|
-| P0 | 默认 JWT Signing Key | appsettings.json 中仍有公开的占位 SigningKey；当前校验主要检查长度，未拒绝该固定占位值。生产必须覆盖它。建议单独代码 PR 增加生产启动保护与回归测试 |
-| P1 | API 请求限流 | 本次审计未发现全局 ASP.NET Core Rate Limiter 或统一 429 contract。生产应在可信 API Gateway / Reverse Proxy 配置按身份、Tenant 和来源的限流，并单独评估应用内限流 |
-| P1 | Audit Log 完整性 | AuditLogMiddleware 位于 UseAuthorization 之后；被 Authorization middleware 提前拒绝的请求可能不会进入该审计中间件。不要把现有 Audit Log 当作完整的认证失败日志 |
-| P1 | Secret 轮换 | Webhook Secret 使用 Auth SigningKey 加密；AI Provider Credential 使用 SecretProtection.MasterKey，未配置时会回退到 Auth SigningKey。轮换前需评估已有密文 |
-| P1 | 上传与解析资源边界 | 应用有上传大小限制和扩展名白名单；本次审计未证明所有 PDF / DOCX / HTML 解析场景都具备解压大小、CPU、内存与执行时间上限 |
-| P2 | TLS / CORS / Proxy | 当前 API pipeline 未配置 UseHttpsRedirection、UseHsts 或 UseCors。生产应由受控 ingress / reverse proxy 终止 TLS，并针对跨域部署配置明确 allowlist |
+| P0 | 默认 JWT Signing Key | appsettings.json 仍保留开发占位值，但本分支 Production 启动校验会拒绝已知 SigningKey 占位值，并要求独立且至少 32 字节的 SecretProtection MasterKey。生产仍必须从 Secret Store 注入真实随机值 |
+| P1 | API 请求限流 | API 已有全局固定窗口限流；登录、注册、刷新令牌接口默认额外限制为每来源 IP 每 60 秒 10 次。限流为单实例内存计数，多实例仍需在可信 API Gateway / Reverse Proxy 统一限流 |
+| P1 | Audit Log 完整性 | AuditLogMiddleware 已移至 Authorization 之前，可记录已认证 actor 的授权拒绝和限流响应；匿名认证失败仍不会写入关联用户的 Audit Log，应结合反向代理与安全日志监控 |
+| P1 | Secret 轮换 | 新写入的 AI Credential 与 Webhook Secret 使用独立 SecretProtection MasterKey；previous master keys 与 legacy Auth keys 可在受控轮换期间解密旧密文。历史无版本前缀的明文 Webhook Secret 仍为兼容读取，必须重新保存迁移；应用没有自动批量重加密命令 |
+| P1 | 上传与解析资源边界 | 已限制请求体 / 上传大小、提取文本字符数、PDF 页数与 DOCX part 字符数，并为 HTML 正则设置超时；恶意文件扫描、完整解析沙箱及所有 CPU / 内存边界仍未覆盖 |
+| P2 | TLS / CORS / Proxy / Swagger | Production 已启用 HSTS；应用层 HTTPS 重定向可配置开启，CORS 使用精确 origin allowlist，Forwarded Headers 仅接受 loopback 或明确配置的可信代理。Swagger 仅在 Development 默认开放，其他环境必须显式设置 Swagger:Enabled=true；生产开启时应再加网络访问控制 |
 | P2 | Trace / Audit 中的业务数据 | Chat / Run 会保存用户问题和答案；Timeline progress 可能包含检索 query。应按敏感业务数据管理访问、保留期和导出 |
 
 ## 2. Authentication、Authorization 与 RBAC
@@ -44,9 +44,7 @@
 
 ### 已知风险：默认 Signing Key
 
-当前 appsettings.json 的默认 Auth:SigningKey 是公开的占位字符串，并且其长度满足现有 32 字节检查。如果生产部署未覆盖该值，攻击者可能构造能够通过 HMAC JWT 签名校验的令牌，导致身份伪造和越权访问。
-
-**必须措施：** 生产环境始终显式注入随机密钥；部署发布流程应验证实际配置来源。**建议代码修复：** 在 Production 环境拒绝已知占位值，补充生产配置测试。文档说明不能替代这项代码保护。
+appsettings.json 仍保留开发环境占位值，但运行时配置验证现已在 Production 启动时拒绝已知 SigningKey 占位值，并要求至少 32 字节的独立 SecretProtection:MasterKey；MasterKey 不能与 JWT SigningKey 相同。对应回归测试覆盖 Compose 与 appsettings 的公开占位值、缺失 MasterKey 和重复使用同一密钥。生产仍必须从 Secret Store 注入随机值，不能将启动校验当作密钥生成器。
 
 ### 会话列表的权限重检
 
@@ -58,22 +56,20 @@
 
 ### AI Provider Credential
 
-AiCredentialProtector 使用 AES-GCM，密文以版本前缀保存。密钥由 SecretProtection:MasterKey 派生；如果该配置为空，当前代码会回退到 Auth:SigningKey，以兼容开发环境。
+AiCredentialProtector 使用 AES-GCM。新写入密文使用 SecretProtection:MasterKey 派生的独立密钥；开发环境在 MasterKey 为空时仍兼容 Auth:SigningKey。生产启动验证会拒绝缺失或与 JWT SigningKey 相同的 MasterKey。
 
 生产要求：
 
 1. 显式配置独立的 SECRET_PROTECTION_MASTER_KEY。
 2. 将该密钥保存在部署 Secret Store，不提交到仓库、镜像或日志。
 3. 限制读取和修改 Secret 的运维权限。
-4. 轮换前先验证已有 AI Provider Credential 的解密兼容性；直接更换 MasterKey 会使旧密文无法用新 key 解密，除非先执行受控重加密或重新录入。
+4. MasterKey 轮换时，先将新密钥配置为 MasterKey，并把旧密钥暂时加入 PreviousMasterKeys；应用会用当前密钥加密、用当前/previous keys 解密。随后通过 AI Connection 更新 API 重新录入凭据，确认所有凭据已用新密钥保存后，再移除旧密钥。若历史凭据曾使用 Auth:SigningKey 加密，轮换 Auth:SigningKey 前还应将旧值临时加入 LegacyAuthSigningKeys，直到相关凭据重新录入。
 
 ### Webhook Secret
 
-WebhookSecretProtector 当前从 Auth:SigningKey 派生加密密钥。Webhook Secret 以 enc:v1: 格式保存，API 只返回 hasSecret，不返回明文。
+WebhookSecretProtector 新写入使用独立 MasterKey 派生的 AES-GCM 密钥，并以 enc:v2: 保存；旧 enc:v1: 密文仍通过 Auth:SigningKey 或 LegacyAuthSigningKeys 解密。为兼容更早的数据，无版本前缀的旧值仍会按明文读取且不会自动迁移；应通过更新 API 重新保存这些 Secret。API 只返回 hasSecret，不返回明文。
 
-因此更换 AUTH_SIGNING_KEY 不仅影响 JWT，也会影响已保存的 Webhook Secret 解密。轮换步骤见 [Webhook Automation](WEBHOOK_AUTOMATION.md)：盘点订阅、重新获取平台密钥、在维护窗口轮换、重新保存 Secret 并逐一调用 test API 验证。
-
-不要混淆两类加密密钥：AI Provider Credential 的首选配置是 SECRET_PROTECTION_MASTER_KEY；Webhook Secret 当前仍依赖 Auth SigningKey。当前仓库未提供一个通用的密钥轮换命令来自动重加密所有现有 Secret。
+Auth SigningKey 与 SecretProtection MasterKey 已分离。轮换 Auth SigningKey 会使旧 JWT 访问令牌失效；如仍有旧的 AI/Webhook 密文，先把旧 Auth key 放入 LegacyAuthSigningKeys，再逐项通过 AI Connection / Webhook 更新 API 重新录入凭据并验证。MasterKey 轮换使用 PreviousMasterKeys；只有确认旧密文均已重新保存后才移除旧密钥。应用没有自动批量重加密命令，因此不要在没有兼容密钥或重新录入计划时直接删除旧密钥。
 
 ### 其他凭据
 
@@ -118,8 +114,8 @@ Tenant AI Provider 的 Base URL 是另一个出站请求边界。按 [AI Provide
 
 ### 已实现的控制
 
-- Kestrel 的最大 request body size 配置为 64 MiB。
-- RagOptions 默认 MaxUploadMegabytes 为 30 MiB；上传服务还检查空文件、大小和支持的扩展名。
+- Kestrel request body 上限根据 Rag:MaxUploadMegabytes 计算，允许文件上限外额外 1 MiB multipart overhead；默认文件上限为 30 MiB，MultipartBodyLengthLimit 也限制单个 multipart section。
+- 上传服务继续检查空文件、文件长度和支持的扩展名；启动时拒绝超出 1–63 MiB 范围的 MaxUploadMegabytes。
 - 支持扩展名为 txt、md、csv、json、xml、html、pdf、docx。
 - 展示文件名使用 Path.GetFileName；磁盘存储名由服务端生成的 document ID 与扩展名构成，而不是直接使用用户提供的路径。
 - 上传、列表、下载、retry、reindex、cancel 和删除操作均要求认证，并按 KB Viewer / Editor 权限检查。
@@ -129,12 +125,12 @@ Tenant AI Provider 的 Base URL 是另一个出站请求边界。按 [AI Provide
 
 - 将上传限制与 reverse proxy / ingress 的 request size limit 一起配置，避免代理允许的请求体远大于应用限制。
 - 对来自不可信用户的文档考虑病毒扫描、隔离区和审核流程。
-- 限制并监控文档解析的 CPU、内存、临时磁盘与并发；特别验证 DOCX 压缩包、异常 PDF 和大型 HTML 的资源消耗。
+- 解析器现对提取文本设置 MaxExtractedCharacters（默认 2,000,000）、对 PDF 设置 MaxPdfPages（默认 1,000），并为 HTML 正则设置 2 秒超时；DOCX 使用 Open XML MaxCharactersInPart 限制。仍应监控 CPU、内存、临时磁盘与并发，并考虑病毒扫描和隔离。
 - 生产文件存储目录与应用代码目录分离，限制 OS 权限；S3 bucket 保持私有，禁止直接公开对象 URL。
 - 检查本地磁盘和临时目录空间；删除、重建和失败恢复流程要在 SQLite 与 PostgreSQL 模式分别验证。
 - 文件类型不能只依赖客户端 Content-Type；当前服务使用扩展名白名单，但这不等于完整的文件内容验证或恶意文件扫描。
 
-**待验证：** 当前代码与测试未证明对所有解析器输入都存在统一的解压后大小、执行时间和恶意文件扫描控制。不要把扩展名白名单描述成完整的上传安全方案。
+**残余风险：** 这些限制降低了解析资源耗尽风险，但不是恶意文件扫描或完整沙箱；PDF 库打开文件、ZIP 容器解析及并发作业仍应在生产环境监控，不能把扩展名白名单描述成完整的上传安全方案。
 
 ## 6. Prompt Injection 与 Agent 工具边界
 
@@ -168,7 +164,7 @@ Citation Gate 只能验证引用 ID 与 Evidence 对应关系，不能证明答�
 - 默认 Planner 查询上限为 3；Reviewer 默认最多 1 次 Repair retry。
 - Model Pricing / Deployment identity 用于估算运行成本并写入 Run / Usage 记录。
 
-这些控制能限制单次 RAG 工作流的资源范围，但**不是请求速率限制**。当前审计未发现应用层全局 429 Rate Limiter。生产应在 API Gateway / Reverse Proxy 层按用户、Tenant、IP 与 endpoint 设定速率和并发限制，并针对注册、登录、Refresh、文件上传、Search、Chat、Evaluation Run、Webhook test 设定合适的保护。
+这些控制限制单次 RAG 工作流的资源范围，但不同于请求速率限制。API 提供全局固定窗口 429 Rate Limiter，默认每个已认证用户/API Key 或匿名 IP 每 60 秒 120 个请求；登录、注册和刷新令牌接口另有每来源 IP 每 60 秒默认 10 次的严格上限，可通过 RateLimiting:AuthPermitLimit 配置且不会超过全局 PermitLimit。可通过 RateLimiting:PermitLimit 与 RateLimiting:WindowSeconds 调整全局设置。限流为单实例内存计数，不是分布式配额；多实例生产仍应在 Gateway / Reverse Proxy 层统一按用户、Tenant、IP 和高成本 endpoint 限流。
 
 不要把成本估算当作 Provider 最终账单；对预算接近阈值、重试激增、异常长问题和批量 Evaluation 应设置监控与告警。
 
@@ -177,7 +173,7 @@ Citation Gate 只能验证引用 ID 与 Evidence 对应关系，不能证明答�
 - Chat 正文在完整 Workflow 与 Final Citation Gate 之后才向客户端发送；Progress Timeline 可在运行中实时更新。
 - Progress payload 可能包含本轮检索 query，因此即使它不是 Chain of Thought，也可能包含用户输入或敏感业务词汇。
 - Conversation 会持久化用户消息与 Assistant Answer；RAG Run 记录 Query、Answer、运行状态、成本估算和结构化 Trace。
-- Audit Log 记录动作、资源、状态码、IP address、User-Agent 与部分操作详情。不要默认它是完整的安全事件日志；当前中间件顺序可能漏掉被 Authorization middleware 提前拒绝的请求。
+- Audit Log 记录动作、资源、状态码、IP address、User-Agent 与部分操作详情。AuditLogMiddleware 现在位于 Authorization 之前，可记录已认证 actor 被授权中间件拒绝的状态码，并对 4xx/5xx 设置 failed 标志。匿名认证失败不会写入关联用户的 Audit Log，仍应结合反向代理与安全日志监控。
 - OpenTelemetry span tags 用于诊断阶段、检索数量、模型与耗时。配置导出端点时应限制 Collector / backend 的访问和数据保留。
 - 不应记录 Bearer Token、Refresh Token、API Key、Provider Credential、Webhook Secret 或完整的敏感文件内容。
 
@@ -185,24 +181,24 @@ Citation Gate 只能验证引用 ID 与 Evidence 对应关系，不能证明答�
 
 ## 9. HTTPS、CORS、反向代理与请求限制
 
-当前 API pipeline 注册异常处理、Swagger、静态文件、Authentication、Authorization 和 AuditLogMiddleware；本次审计未发现应用内 UseHttpsRedirection、UseHsts 或 UseCors。
+API pipeline 现已在配置的可信代理之后处理 Forwarded Headers；Production 响应启用 HSTS；可通过 Security:EnforceHttpsRedirection 显式启用应用层 HTTPS redirect（要求 Kestrel HTTPS 端口或受信任代理提供正确的 X-Forwarded-Proto）。CORS 仅允许 Cors:AllowedOrigins 中的精确 origin，默认空列表即不允许跨域。Rate Limiting 默认启用。
 
 生产部署应：
 
-- 由受控 Load Balancer / Ingress 终止 TLS，强制 HTTPS，并按组织策略设置 HSTS。
-- API 与 React UI 尽量使用同源部署；若必须跨域，配置明确的 CORS origin allowlist，不使用任意 Origin + credentials 的组合。
-- 只信任受控代理提供的 forwarded headers；不要盲目信任客户端提交的转发头。
+- 由受控 Load Balancer / Ingress 终止 TLS 并强制 HTTPS；若由应用重定向，先配置 ForwardedHeaders:KnownProxies 与 HTTPS 端口，再启用 Security:EnforceHttpsRedirection。
+- API 与 React UI 尽量使用同源部署；若必须跨域，配置明确的 Cors:AllowedOrigins allowlist，不使用任意 Origin + credentials 的组合。
+- 只信任 ForwardedHeaders:KnownProxies 中的代理 IP；默认不信任任意客户端提交的转发头。
 - 在 ingress 与应用两侧设置一致的 request size、连接超时、上游超时和并发限制。
-- 限制 Swagger 的生产可见性或仅允许受控网络访问。
+- Swagger 在 Development 默认开放；其他环境默认关闭。只有在受控网络确实需要时才设置 `Swagger:Enabled=true`（Compose: `SWAGGER_ENABLED=true`），并通过 ingress / VPN / allowlist 限制访问。
 - 对管理端点使用网络层访问控制，并持续验证认证和 RBAC，而不是依赖路径难以猜测。
 
 ## 10. 生产上线检查清单
 
-- [ ] 生产 Auth:SigningKey 已显式覆盖默认占位值，并来自 Secret Store。
+- [ ] 生产 Auth:SigningKey 已显式覆盖默认占位值，并来自 Secret Store；应用启动时会拒绝已知占位值。
 - [ ] AUTH_ALLOW_REGISTRATION=false，除非已批准公开注册并有滥用防护。
-- [ ] SECRET_PROTECTION_MASTER_KEY 已独立设置；已确认 AI Credential 与 Webhook Secret 的轮换影响。
+- [ ] SECRET_PROTECTION_MASTER_KEY 已独立设置；MasterKey / PreviousMasterKeys / LegacyAuthSigningKeys 的轮换步骤已演练。
 - [ ] S3 / PostgreSQL / RabbitMQ / Provider 凭据均不是示例值，权限按最小化配置。
-- [ ] HTTPS、HSTS、CORS、forwarded headers、request size、timeout 与 rate limit 在 ingress 侧已核对。
+- [ ] HSTS、CORS allowlist、可信 forwarded headers、request size 与应用层 / ingress rate limit 已核对。
 - [ ] Tenant / KB role、API Key scopes、KB binding 和 API Key 撤销流程经过验证。
 - [ ] Webhook HMAC、DNS SSRF 校验、redirect/proxy 禁用、timeout 与 CAP retry 语义经过验证。
 - [ ] 上传大小、文件解析资源消耗、临时目录权限与 S3 私有访问边界经过验证。
@@ -212,8 +208,6 @@ Citation Gate 只能验证引用 ID 与 Evidence 对应关系，不能证明答�
 
 ## 11. 本次审计中需单独跟踪的事项
 
-1. **生产占位 Signing Key 拒绝策略：** 建议独立代码 PR，不与纯文档修改混合。
-2. **应用层 Rate Limiter：** 当前未发现统一实现；评估是否需要按 Tenant / API Key 进行应用层限流。
-3. **认证失败审计覆盖：** 验证 AuditLogMiddleware 的当前顺序是否满足安全审计要求。
-4. **文件解析资源限制：** 以恶意 / 极端输入建立针对 PDF、DOCX、HTML 的资源限制测试。
-5. **Secret 轮换工具：** 明确 Auth SigningKey、AI Credential MasterKey 与 Webhook Secret 的独立轮换流程。
+1. **会话列表权限重检：** 仍需单独修复 ConversationService.ListAsync 在用户失去 KB membership 后返回旧会话元数据的问题。
+2. **多实例限流：** 应用层限流是单实例内存计数；多实例部署必须在 Gateway / Reverse Proxy 统一限流。
+3. **解析器沙箱与恶意文件扫描：** 当前大小 / 页数 / 字符限制不是病毒扫描或完整隔离执行。

@@ -27,37 +27,54 @@ public sealed class AuditLogMiddleware(RequestDelegate next)
         {
             try
             {
-                var actor = HttpActorContext.From(context.User);
-                var tenantId = actor.TenantId
-                               ?? TryGuid(context.Request.RouteValues["tenantId"]?.ToString())
-                               ?? TryGuid(context.Request.Query["tenantId"].FirstOrDefault());
-                var knowledgeBaseId = TryGuid(context.Request.RouteValues["knowledgeBaseId"]?.ToString())
-                                      ?? TryGuid(context.Request.Query["knowledgeBaseId"].FirstOrDefault());
-                if (!tenantId.HasValue && knowledgeBaseId.HasValue)
-                    tenantId = await governance.ResolveTenantIdAsync(knowledgeBaseId.Value, CancellationToken.None);
+                var statusCode = failure is null
+                    ? context.Response.StatusCode
+                    : failure switch
+                    {
+                        UnauthorizedAccessException => StatusCodes.Status403Forbidden,
+                        KeyNotFoundException => StatusCodes.Status404NotFound,
+                        WebhookDestinationBlockedException => StatusCodes.Status400BadRequest,
+                        InvalidOperationException => StatusCodes.Status400BadRequest,
+                        _ => StatusCodes.Status500InternalServerError
+                    };
+                var isSuccessfulRead = (context.Request.Method is "GET" or "HEAD") && statusCode < 400;
 
-                var path = context.Request.Path.Value ?? string.Empty;
-                var resourceId = context.Request.RouteValues.Values.Select(x => x?.ToString()).LastOrDefault(x => Guid.TryParse(x, out _));
-                var action = context.Request.Method.ToUpperInvariant() switch
+                // Keep successful reads out of the audit stream, but record authenticated
+                // read denials and rate-limit responses as well as the existing write actions.
+                if (!isSuccessfulRead)
                 {
-                    "POST" => "create_or_execute",
-                    "PUT" => "update",
-                    "PATCH" => "update",
-                    "DELETE" => "delete",
-                    _ => context.Request.Method.ToLowerInvariant()
-                };
-                await governance.WriteAuditAsync(
-                    actor,
-                    tenantId,
-                    action,
-                    ResourceType(path),
-                    resourceId,
-                    $"{context.Request.Method} {path}",
-                    failure is null ? context.Response.StatusCode : 500,
-                    context.Connection.RemoteIpAddress?.ToString(),
-                    context.Request.Headers.UserAgent.ToString(),
-                    new { route = path, failed = failure is not null, errorType = failure?.GetType().Name },
-                    CancellationToken.None);
+                    var actor = HttpActorContext.From(context.User);
+                    var tenantId = actor.TenantId
+                                   ?? TryGuid(context.Request.RouteValues["tenantId"]?.ToString())
+                                   ?? TryGuid(context.Request.Query["tenantId"].FirstOrDefault());
+                    var knowledgeBaseId = TryGuid(context.Request.RouteValues["knowledgeBaseId"]?.ToString())
+                                          ?? TryGuid(context.Request.Query["knowledgeBaseId"].FirstOrDefault());
+                    if (!tenantId.HasValue && knowledgeBaseId.HasValue)
+                        tenantId = await governance.ResolveTenantIdAsync(knowledgeBaseId.Value, CancellationToken.None);
+
+                    var path = context.Request.Path.Value ?? string.Empty;
+                    var resourceId = context.Request.RouteValues.Values.Select(x => x?.ToString()).LastOrDefault(x => Guid.TryParse(x, out _));
+                    var action = context.Request.Method.ToUpperInvariant() switch
+                    {
+                        "POST" => "create_or_execute",
+                        "PUT" => "update",
+                        "PATCH" => "update",
+                        "DELETE" => "delete",
+                        _ => context.Request.Method.ToLowerInvariant()
+                    };
+                    await governance.WriteAuditAsync(
+                        actor,
+                        tenantId,
+                        action,
+                        ResourceType(path),
+                        resourceId,
+                        $"{context.Request.Method} {path}",
+                        statusCode,
+                        context.Connection.RemoteIpAddress?.ToString(),
+                        context.Request.Headers.UserAgent.ToString(),
+                        new { route = path, failed = statusCode >= 400, errorType = failure?.GetType().Name },
+                        CancellationToken.None);
+                }
             }
             catch
             {
@@ -68,7 +85,7 @@ public sealed class AuditLogMiddleware(RequestDelegate next)
 
     private static bool IsAuditable(HttpRequest request)
         => request.Path.StartsWithSegments("/api")
-           && request.Method is "POST" or "PUT" or "PATCH" or "DELETE"
+           && request.Method is "GET" or "HEAD" or "POST" or "PUT" or "PATCH" or "DELETE"
            && !request.Path.StartsWithSegments("/api/auth/refresh");
 
     private static Guid? TryGuid(string? value) => Guid.TryParse(value, out var parsed) ? parsed : null;

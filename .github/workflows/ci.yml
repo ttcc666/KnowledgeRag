@@ -193,6 +193,9 @@ jobs:
       OTEL_ENABLED: 'true'
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       RUN_EXTERNAL_BACKEND_TESTS: '1'
+      # Explicit disposable CI-only keys; production startup rejects Compose example placeholders.
+      AUTH_SIGNING_KEY: ci-only-signing-key-not-for-production-0123456789
+      SECRET_PROTECTION_MASTER_KEY: ci-only-encryption-master-key-not-for-production-0123456789
     steps:
       - name: Native CI scope
         run: echo "native=${{ needs.changes.outputs.native }} full=${{ needs.changes.outputs.full }}"

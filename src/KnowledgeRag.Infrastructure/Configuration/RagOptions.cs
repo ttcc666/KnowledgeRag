@@ -15,6 +15,8 @@ public sealed class RagOptions
     public int EmbeddingBatchSize { get; set; } = 16;
     public int UpsertBatchSize { get; set; } = 32;
     public int MaxUploadMegabytes { get; set; } = 30;
+    public int MaxExtractedCharacters { get; set; } = 2_000_000;
+    public int MaxPdfPages { get; set; } = 1000;
     public int MaxEvidenceTokens { get; set; } = 6000;
     public int MaxEvidenceTokensPerDocument { get; set; } = 2200;
 
