@@ -300,19 +300,22 @@ S3_FORCE_PATH_STYLE=false
 }
 ```
 
-启动时执行：
+当 `Database:AutoMigrate=true`（默认值）时，应用启动会执行 EF Core migrations。生产环境也可以设置 `DATABASE_AUTO_MIGRATE=false`，改由发布流水线中的 migration bundle 执行 schema 更新。
 
-```csharp
-await db.Database.MigrateAsync();
-```
-
-项目已包含初始 production migration：
+当前 migration 不止初始 schema，包含：
 
 ```text
-src/KnowledgeRag.Infrastructure/Persistence/Migrations/
-  202610270001_InitialProduction.cs
-  AppDbContextModelSnapshot.cs
+202610270001_InitialProduction
+20261027050438_SyncCurrentModel
+20261028100000_PlatformGovernanceSuite
+20261028120000_WebhookChannelProviders
+20261028164203_TenantAiProviderFoundation
+20261029003620_TenantAiEmbeddingIndexGenerations
+20261029021050_AiDeploymentRoutingGovernance
+AppDbContextModelSnapshot.cs
 ```
+
+旧版 `EnsureCreated` 数据库不要直接执行最新 migration；升级步骤见 [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)。
 
 安装 EF CLI：
 
