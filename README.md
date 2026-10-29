@@ -51,41 +51,56 @@ Api ───────► Infrastructure ───────► Application
 
 `Program.cs` 只负责组合启动；API 路由按业务拆在 `src/KnowledgeRag.Api/Endpoints`，EF Core migrations 固定在 `KnowledgeRag.Infrastructure/Persistence/Migrations`。详细开发约定见 [`ARCHITECTURE.md`](ARCHITECTURE.md)。
 
-```text
-React / Vite / shadcn-admin
-      │
-      ▼
-Client / Admin UI
-      │
-      ├── Bearer JWT
-      └── X-Api-Key
-      │
-      ▼
-ASP.NET Core
-      │
-      ├── Tenant / RBAC / API Key
-      ├── Document / Conversation
-      └── Microsoft Agent Framework
-                  │
-             TextSearchProvider
-                  │
-                  ▼
-             Hybrid Search
-       ┌──────────┴──────────┐
-       │                     │
- Vector backend         Lexical backend
- Qdrant | pgvector      BM25 | Postgres FTS
-       │                     │
-       └──────────┬──────────┘
-                  ▼
-                 RRF
-                  ▼
-               reranker
-                  ▼
-              Top-K chunks
-                  ▼
-        OpenAI-compatible LLM
-```
+~~~text
+同步 Chat 请求
+React + assistant-ui
+  └─ REST / SSE → ASP.NET Core Conversation Endpoint
+                       ├─ Authentication + Tenant / KB authorization
+                       └─ ConversationService
+                            ├─ resolve KB RAG Profile / model / budget snapshot
+                            └─ RagAgentService
+                                 └─ Microsoft Agent Framework Workflow
+                                      Planner
+                                        ↓
+                                      MultiQuerySearchService
+                                        ↓
+                                      KnowledgeSearchService (per query)
+                                        ├─ Vector: Qdrant / pgvector
+                                        └─ Lexical: C# BM25 / PostgreSQL FTS
+                                        ↓
+                                      deterministic query RRF / dedupe / rerank
+                                        ↓
+                                      Evidence context budget
+                                        ↓
+                                      Answer (+ configured Specialist Agent-as-Tool)
+                                        ↓
+                                      Reviewer → bounded retrieval / repair (when enabled)
+                                        ↓
+                                      FinalAnswerPolicy / Citation Gate
+                                        ↓
+                                      persist accepted answer + cited Sources + usage
+
+SSE progress events update the Timeline during execution; final answer delta is
+emitted only after workflow review and the deterministic Citation Gate.
+~~~
+
+Search and Governance use their own authenticated Endpoints and services; they do not
+pass through the Chat Agent Workflow. Retrieval ranking, authorization and citation
+validation remain code-controlled.
+
+异步文档处理：
+
+~~~text
+POST /api/knowledge-bases/{id}/documents
+  → store source file + publish CAP event
+  → DocumentIndexingSubscriber
+  → parse / chunk / embed
+  → database chunks + configured vector backend
+  ├─ CAP transport: in-memory (development/test) or RabbitMQ
+  └─ SignalR user-group progress notification
+~~~
+
+运行时基础设施：业务数据使用 SQLite 或 PostgreSQL；向量后端使用 Qdrant 或 pgvector；词法后端使用 C# BM25 或 PostgreSQL FTS；文件存储使用 Local 或 S3-compatible storage；启用 RabbitMQ 时 CAP 消息状态由 PostgreSQL 持久化；OpenTelemetry 负责 Trace / Metrics 导出。
 
 文件存储：
 

@@ -11,6 +11,9 @@
 | 管理 RAG 治理与评估 | [Governance & Evaluation](GOVERNANCE_EVALUATION.md) | RAG Profile、Run Trace、Budget Reservation、Model Pricing、Prompt、Audit、Evaluation v3 |
 | 配置自动通知 | [Webhook Automation](WEBHOOK_AUTOMATION.md) | Event Types、Slack/Discord/Teams/飞书/钉钉/企业微信、自定义 HMAC、CAP retry、SSRF |
 | 生产部署与排障 | [Production Operations](PRODUCTION_OPERATIONS.md) | PostgreSQL/RabbitMQ/Search/Storage/OTel、health、migration、备份恢复、Secret rotation、故障排查 |
+| API 与权限 | [API / RBAC Reference](API_RBAC_REFERENCE.md) | 路由、Authentication、Tenant / KB RBAC、API Key scope、SSE、错误语义 |
+| 生产安全加固 | [Security Hardening](SECURITY_HARDENING.md) | 生产 Secret、SSRF、上传、Prompt Injection、限流、残余风险 |
+| 故障定位 | [Troubleshooting](TROUBLESHOOTING.md) | 可执行的数据库、检索、Workflow、SSE、Evaluation、CAP / OTel 排障 |
 | 理解 RAG 执行链 | [RAG Agent Workflow](RAG_AGENT_WORKFLOW.md) | Planner、Multi-query Retrieval、Answer、Reviewer/Repair、Citation Gate、Evaluation |
 | 理解模块边界 | [系统架构](../ARCHITECTURE.md) | Domain / Application / Infrastructure / Api、核心模块与运行时流程 |
 | 配置异步文档处理 | [CAP + SignalR ingestion](../CAP_SIGNALR_INGESTION.md) | 单文档摄取、CAP、SignalR、KB-wide Embedding generation |
@@ -30,6 +33,7 @@
 2. [RAG Agent Workflow](RAG_AGENT_WORKFLOW.md)
 3. [开发流程与 CI 策略](../DEVELOPMENT_WORKFLOW.md)
 4. [验证指南](../VALIDATION.md)
+5. [API / RBAC Reference](API_RBAC_REFERENCE.md)
 
 ### 管理员 / AI Platform Owner
 
@@ -44,9 +48,20 @@
 建议顺序：
 
 1. [Production Operations](PRODUCTION_OPERATIONS.md)
+2. [Troubleshooting](TROUBLESHOOTING.md)
+3. [Security Hardening](SECURITY_HARDENING.md)
 2. [数据库迁移指南](../MIGRATION_GUIDE.md)
 3. [CAP + SignalR ingestion](../CAP_SIGNALR_INGESTION.md)
 4. [验证指南](../VALIDATION.md)
+
+### Security / API reviewer
+
+建议顺序：
+
+1. [API / RBAC Reference](API_RBAC_REFERENCE.md)
+2. [Security Hardening](SECURITY_HARDENING.md)
+3. [Webhook Automation](WEBHOOK_AUTOMATION.md)
+4. [Production Operations](PRODUCTION_OPERATIONS.md)
 
 ## 当前代码入口
 
