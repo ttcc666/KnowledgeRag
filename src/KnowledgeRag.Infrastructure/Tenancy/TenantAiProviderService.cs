@@ -3,9 +3,11 @@ using KnowledgeRag.Application.Contracts;
 using KnowledgeRag.Application.Security;
 using KnowledgeRag.Domain.Entities;
 using KnowledgeRag.Infrastructure.AI;
+using KnowledgeRag.Infrastructure.Configuration;
 using KnowledgeRag.Infrastructure.Governance;
 using KnowledgeRag.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace KnowledgeRag.Infrastructure.Tenancy;
 
@@ -13,8 +15,11 @@ public sealed class TenantAiProviderService(
     AppDbContext db,
     TenantAccessService access,
     AiCredentialProtector credentialProtector,
-    AiProviderClientFactory clientFactory)
+    AiProviderClientFactory clientFactory,
+    IOptions<AiOptions> aiOptions)
 {
+    private readonly AiOptions _ai = aiOptions.Value;
+
     private static readonly AiProviderDescriptor[] ProviderCatalog =
     [
         new(AiProviderTypes.OpenAiCompatible, "OpenAI Compatible", "OpenAI API 兼容端点，可接 OpenAI、DeepSeek、Qwen、vLLM、LiteLLM、OpenRouter 等。", true)
@@ -42,6 +47,11 @@ public sealed class TenantAiProviderService(
         {
             entity = await db.Set<AiProviderConnectionEntity>().SingleOrDefaultAsync(x => x.Id == id && x.TenantId == tenantId, ct)
                 ?? throw new KeyNotFoundException("AI Provider Connection 不存在。");
+            var activeIndexUsesConnection = await db.KnowledgeBaseIndexGenerations.AnyAsync(x =>
+                x.ProviderConnectionId == id && x.Status == KnowledgeBaseIndexGenerationStatuses.Active, ct);
+            if (activeIndexUsesConnection && (!request.IsEnabled || !entity.BaseUrl.Equals(baseUrl, StringComparison.Ordinal) ||
+                !entity.ProviderType.Equals(providerType, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException("该 Provider Connection 正在服务活动知识库索引。请先切换并完成 Embedding 重建后，再停用或更改 Provider / Base URL；仅轮换凭据不受限制。");
             entity.Name = name;
             entity.ProviderType = providerType;
             entity.BaseUrl = baseUrl;
@@ -71,6 +81,9 @@ public sealed class TenantAiProviderService(
         await access.RequireAsync(actor, tenantId, TenantRole.Admin, ct);
         var entity = await db.Set<AiProviderConnectionEntity>().SingleOrDefaultAsync(x => x.Id == connectionId && x.TenantId == tenantId, ct);
         if (entity is null) return;
+        if (await db.KnowledgeBaseIndexGenerations.AnyAsync(x => x.ProviderConnectionId == connectionId &&
+            (x.Status == KnowledgeBaseIndexGenerationStatuses.Building || x.Status == KnowledgeBaseIndexGenerationStatuses.Active), ct))
+            throw new InvalidOperationException("该 Provider Connection 正在被活动或构建中的知识库索引使用，请先完成或取消索引重建。");
         if (await db.Set<AiModelDeploymentEntity>().AnyAsync(x => x.ConnectionId == connectionId, ct))
             throw new InvalidOperationException("该连接仍有模型 Deployment，请先删除或迁移 Deployment。");
         db.Remove(entity);
@@ -205,6 +218,84 @@ public sealed class TenantAiProviderService(
         };
         return deploymentId.HasValue ? await ResolveEndpointAsync(tenantId, deploymentId.Value, modelType, ct) : null;
     }
+
+    public async Task<EmbeddingEndpointResolution> ResolveEmbeddingTargetAsync(Guid knowledgeBaseId, CancellationToken ct = default)
+    {
+        var knowledgeBase = await db.KnowledgeBases.AsNoTracking().SingleOrDefaultAsync(x => x.Id == knowledgeBaseId, ct)
+            ?? throw new KeyNotFoundException("知识库不存在。");
+        var defaults = await db.Set<TenantAiDefaultsEntity>().AsNoTracking()
+            .SingleOrDefaultAsync(x => x.TenantId == knowledgeBase.TenantId, ct);
+        if (defaults?.DefaultEmbeddingDeploymentId is not Guid deploymentId)
+            return PlatformEmbeddingResolution();
+
+        var row = await (from deployment in db.Set<AiModelDeploymentEntity>().AsNoTracking()
+                         join connection in db.Set<AiProviderConnectionEntity>().AsNoTracking() on deployment.ConnectionId equals connection.Id
+                         where deployment.Id == deploymentId && deployment.TenantId == knowledgeBase.TenantId &&
+                               connection.TenantId == knowledgeBase.TenantId
+                         select new { Deployment = deployment, Connection = connection }).SingleOrDefaultAsync(ct)
+            ?? throw new InvalidOperationException("租户默认 Embedding Deployment 不存在或不属于当前租户。");
+        if (!row.Deployment.IsEnabled || !row.Connection.IsEnabled)
+            throw new InvalidOperationException("租户默认 Embedding Deployment 或 Provider Connection 已停用。");
+        if (!row.Deployment.ModelType.Equals(AiModelTypes.Embedding, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("租户默认 Deployment 不是 Embedding 类型。");
+        var dimensions = row.Deployment.EmbeddingDimensions.GetValueOrDefault();
+        if (dimensions <= 0)
+            throw new InvalidOperationException("租户默认 Embedding Deployment 缺少有效维度配置。");
+
+        return new EmbeddingEndpointResolution(
+            ToEndpoint(row.Connection, row.Deployment.Id, row.Deployment.RemoteModelName),
+            dimensions,
+            true,
+            row.Deployment.DisplayName,
+            row.Deployment.UpdatedAt);
+    }
+
+    public async Task<EmbeddingEndpointResolution> ResolveEmbeddingEndpointForGenerationAsync(
+        Guid knowledgeBaseId,
+        Guid indexGenerationId,
+        CancellationToken ct = default)
+    {
+        if (indexGenerationId == Guid.Empty) return PlatformEmbeddingResolution();
+        var generation = await db.KnowledgeBaseIndexGenerations.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == indexGenerationId && x.KnowledgeBaseId == knowledgeBaseId, ct)
+            ?? throw new InvalidOperationException("活动 Embedding 索引代次不存在。");
+
+        if (generation.ProviderConnectionId is not Guid connectionId)
+        {
+            return new EmbeddingEndpointResolution(
+                new ResolvedAiEndpoint(generation.EmbeddingDeploymentId, null, generation.ProviderType,
+                    generation.BaseUrl, _ai.ApiKey, generation.ModelName, 0, false),
+                generation.Dimensions,
+                _ai.SendEmbeddingDimensions,
+                generation.DeploymentDisplayName,
+                generation.DeploymentUpdatedAt);
+        }
+
+        var connection = await db.Set<AiProviderConnectionEntity>().AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == connectionId && x.TenantId == generation.TenantId, ct)
+            ?? throw new InvalidOperationException("活动 Embedding 索引引用的 Provider Connection 已不存在。");
+        if (!connection.IsEnabled)
+            throw new InvalidOperationException("活动 Embedding 索引使用的 Provider Connection 已停用。");
+        if (!connection.ProviderType.Equals(generation.ProviderType, StringComparison.OrdinalIgnoreCase) ||
+            !connection.BaseUrl.Equals(generation.BaseUrl, StringComparison.Ordinal))
+            throw new InvalidOperationException("活动 Embedding 索引的 Provider / Base URL 已变化。请恢复原配置或完成新的索引重建。");
+
+        return new EmbeddingEndpointResolution(
+            ToEndpoint(connection, generation.EmbeddingDeploymentId, generation.ModelName),
+            generation.Dimensions,
+            true,
+            generation.DeploymentDisplayName,
+            generation.DeploymentUpdatedAt);
+    }
+
+    private EmbeddingEndpointResolution PlatformEmbeddingResolution()
+        => new(
+            new ResolvedAiEndpoint(null, null, AiProviderTypes.OpenAiCompatible, _ai.BaseUrl, _ai.ApiKey,
+                _ai.EmbeddingModel, 0, false),
+            _ai.EmbeddingDimensions,
+            _ai.SendEmbeddingDimensions,
+            "Platform default",
+            null);
 
     public async Task<ResolvedAiEndpoint> ResolveEndpointAsync(Guid tenantId, Guid deploymentId, string expectedType, CancellationToken ct = default)
     {

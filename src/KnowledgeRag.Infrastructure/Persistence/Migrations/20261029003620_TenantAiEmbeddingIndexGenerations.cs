@@ -11,6 +11,9 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // Guid foreign keys must match the provider-specific principal key type.
+            var guidColumnType = ActiveProvider.Contains("Npgsql", StringComparison.Ordinal) ? "uuid" : "TEXT";
+
             migrationBuilder.DropIndex(
                 name: "IX_DocumentChunks_DocumentId_ChunkIndex",
                 table: "DocumentChunks");
@@ -22,14 +25,14 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
             migrationBuilder.AddColumn<Guid>(
                 name: "ActiveIndexGenerationId",
                 table: "KnowledgeBases",
-                type: "TEXT",
+                type: guidColumnType,
                 nullable: false,
                 defaultValue: new Guid("00000000-0000-0000-0000-000000000000"));
 
             migrationBuilder.AddColumn<Guid>(
                 name: "IndexGenerationId",
                 table: "DocumentChunks",
-                type: "TEXT",
+                type: guidColumnType,
                 nullable: false,
                 defaultValue: new Guid("00000000-0000-0000-0000-000000000000"));
 
@@ -37,28 +40,28 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                 name: "KnowledgeBaseIndexGenerations",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "TEXT", nullable: false),
-                    KnowledgeBaseId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    TenantId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    EmbeddingDeploymentId = table.Column<Guid>(type: "TEXT", nullable: true),
-                    DeploymentDisplayName = table.Column<string>(type: "TEXT", maxLength: 200, nullable: false),
-                    ProviderConnectionId = table.Column<Guid>(type: "TEXT", nullable: true),
-                    ProviderType = table.Column<string>(type: "TEXT", maxLength: 64, nullable: false),
-                    BaseUrl = table.Column<string>(type: "TEXT", maxLength: 2000, nullable: false),
-                    ModelName = table.Column<string>(type: "TEXT", maxLength: 200, nullable: false),
-                    Dimensions = table.Column<int>(type: "INTEGER", nullable: false),
-                    ConnectionRevision = table.Column<int>(type: "INTEGER", nullable: false),
-                    DeploymentUpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
-                    Status = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
-                    ExpectedDocumentCount = table.Column<int>(type: "INTEGER", nullable: false),
-                    CompletedDocumentCount = table.Column<int>(type: "INTEGER", nullable: false),
-                    FailedDocumentCount = table.Column<int>(type: "INTEGER", nullable: false),
-                    ManifestHash = table.Column<string>(type: "TEXT", maxLength: 64, nullable: false),
-                    CreatedByUserId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                    ActivatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
-                    CompletedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
-                    FailureReason = table.Column<string>(type: "TEXT", maxLength: 2000, nullable: true)
+                    Id = table.Column<Guid>(type: guidColumnType, nullable: false),
+                    KnowledgeBaseId = table.Column<Guid>(type: guidColumnType, nullable: false),
+                    TenantId = table.Column<Guid>(type: guidColumnType, nullable: false),
+                    EmbeddingDeploymentId = table.Column<Guid>(type: guidColumnType, nullable: true),
+                    DeploymentDisplayName = table.Column<string>(type: null, maxLength: 200, nullable: false),
+                    ProviderConnectionId = table.Column<Guid>(type: guidColumnType, nullable: true),
+                    ProviderType = table.Column<string>(type: null, maxLength: 64, nullable: false),
+                    BaseUrl = table.Column<string>(type: null, maxLength: 2000, nullable: false),
+                    ModelName = table.Column<string>(type: null, maxLength: 200, nullable: false),
+                    Dimensions = table.Column<int>(type: null, nullable: false),
+                    ConnectionRevision = table.Column<int>(type: null, nullable: false),
+                    DeploymentUpdatedAt = table.Column<DateTimeOffset>(type: null, nullable: true),
+                    Status = table.Column<string>(type: null, maxLength: 32, nullable: false),
+                    ExpectedDocumentCount = table.Column<int>(type: null, nullable: false),
+                    CompletedDocumentCount = table.Column<int>(type: null, nullable: false),
+                    FailedDocumentCount = table.Column<int>(type: null, nullable: false),
+                    ManifestHash = table.Column<string>(type: null, maxLength: 64, nullable: false),
+                    CreatedByUserId = table.Column<Guid>(type: guidColumnType, nullable: false),
+                    CreatedAt = table.Column<DateTimeOffset>(type: null, nullable: false),
+                    ActivatedAt = table.Column<DateTimeOffset>(type: null, nullable: true),
+                    CompletedAt = table.Column<DateTimeOffset>(type: null, nullable: true),
+                    FailureReason = table.Column<string>(type: null, maxLength: 2000, nullable: true)
                 },
                 constraints: table =>
                 {
@@ -93,14 +96,14 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                 name: "KnowledgeBaseIndexGenerationDocuments",
                 columns: table => new
                 {
-                    IndexGenerationId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    DocumentId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    SourceSha256 = table.Column<string>(type: "TEXT", maxLength: 64, nullable: false),
-                    Status = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
-                    ChunkCount = table.Column<int>(type: "INTEGER", nullable: false),
-                    Error = table.Column<string>(type: "TEXT", maxLength: 2000, nullable: true),
-                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                    UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                    IndexGenerationId = table.Column<Guid>(type: guidColumnType, nullable: false),
+                    DocumentId = table.Column<Guid>(type: guidColumnType, nullable: false),
+                    SourceSha256 = table.Column<string>(type: null, maxLength: 64, nullable: false),
+                    Status = table.Column<string>(type: null, maxLength: 32, nullable: false),
+                    ChunkCount = table.Column<int>(type: null, nullable: false),
+                    Error = table.Column<string>(type: null, maxLength: 2000, nullable: true),
+                    CreatedAt = table.Column<DateTimeOffset>(type: null, nullable: false),
+                    UpdatedAt = table.Column<DateTimeOffset>(type: null, nullable: false)
                 },
                 constraints: table =>
                 {

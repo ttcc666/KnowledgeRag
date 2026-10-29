@@ -29,7 +29,7 @@ public sealed class KnowledgeBaseIndexGenerationEntity
     public Guid? EmbeddingDeploymentId { get; set; }
     public string DeploymentDisplayName { get; set; } = string.Empty;
     public Guid? ProviderConnectionId { get; set; }
-    public string ProviderType { get; set; } = "platform";
+    public string ProviderType { get; set; } = "openai-compatible";
     public string BaseUrl { get; set; } = string.Empty;
     public string ModelName { get; set; } = string.Empty;
     public int Dimensions { get; set; }
