@@ -62,7 +62,8 @@ Tenant
 3. Chat 类角色可以在 Knowledge Base 级显式绑定 Deployment。
 4. 未显式绑定时使用 Tenant Default，再没有才回退到平台级 `AI_*` 配置。
 5. **修改 Tenant 默认 Embedding 不会立即改变现有知识库的向量空间。** 必须执行版本化 Reindex，成功后才原子切换。
-6. 一次 RAG Run 开始时会解析实际 Deployment / fallback，并固定成 endpoint snapshot；Run 中途不会因为配置变化自动漂移到另一个 Provider。
+6. Chat / Rerank 在一次 RAG Run 开始时会解析实际 Deployment / fallback，并固定成 endpoint snapshot；Run 中途不会因为配置变化自动漂移到另一个 Provider。
+7. **Embedding Reindex 当前固定使用 Tenant Default 指向的那个 Embedding Deployment，不会自动沿 Deployment fallback 链切换模型。** 这是为了保证一个 index generation 始终对应唯一向量空间。
 
 ---
 
@@ -143,7 +144,7 @@ Base URL 必须：
 | --- | --- |
 | Connection 测试 | `GET /models` |
 | Deployment health | `GET /models` |
-| Chat / Planner / Answer / Reviewer / Specialist | OpenAI-compatible chat client，模型名来自 Deployment |
+| Chat / Planner / Answer / Reviewer / Specialist | OpenAI-compatible Chat API，模型名来自 Deployment |
 | Embedding | `POST /embeddings` |
 | LLM Reranker | `POST /chat/completions`，要求返回 JSON score 列表 |
 
@@ -209,7 +210,7 @@ openrouter-prod-fallback
 - 不能更改 Base URL；
 - **允许只轮换 Credential**。
 
-如果确实要换 Embedding Provider / Base URL，应先配置新的 Deployment，并按第 10 节完成新索引代次切换。
+如果确实要换 Embedding Provider / Base URL，应先配置新的 Deployment，并按第 11 节完成新索引代次切换。
 
 ---
 
@@ -339,9 +340,9 @@ unknown
 GET /models
 ```
 
-### Runtime 对 health 的处理
+### Chat / Rerank Runtime 对 health 的处理
 
-一个 Deployment 只有在下面情况才被视为不可用：
+Chat / Rerank 在解析显式 Deployment 路由时，下面情况会被视为不可用：
 
 ```text
 Deployment disabled
@@ -351,13 +352,24 @@ OR
 health == unhealthy
 ```
 
-`unknown` 当前不会自动阻断运行。
+`unknown` 当前不会自动阻断 Chat / Rerank 路由。
+
+### Embedding 的 health 语义不同
+
+当前 Embedding Reindex：
+
+- 使用 Tenant Default 指向的 **确切 Embedding Deployment**；
+- 检查 Deployment / Connection 是否 enabled；
+- 不会因为 `health == unhealthy` 自动改用 fallback；
+- 不会在一个 generation 内切换到另一 Embedding Deployment。
+
+因此生产上在启动 Reindex 前应先主动执行 health check，再做实际 Embedding smoke。health 只是运维状态，不是 Embedding generation 的自动路由器。
 
 生产建议：
 
 1. 新建后主动执行 health check；
-2. health 为 `healthy` 后再绑定生产 RAG Profile；
-3. 再做一次真实 Chat / Search smoke，避免 `/models` 正常但推理接口异常。
+2. health 为 `healthy` 后再绑定生产 RAG Profile或作为 Embedding target；
+3. 再做一次真实 Chat / Search / Reindex smoke，避免 `/models` 正常但推理接口异常。
 
 ---
 
@@ -379,10 +391,10 @@ chat-primary
 - fallback 必须与源 Deployment 类型相同；
 - 不能 fallback 到自己；
 - 不允许形成循环，例如 `A → B → A`；
-- 运行时最大解析深度为 16；
+- Chat / Rerank 运行时最大解析深度为 16；
 - 系统不会在未配置 fallback 时随机选择其它 Provider。
 
-### 什么时候会走 fallback
+### Chat / Rerank 什么时候会走 fallback
 
 运行开始时，如果当前 Deployment：
 
@@ -394,9 +406,25 @@ chat-primary
 
 解析成功后，本次 Run 固定使用解析出的 endpoint snapshot，不会在中途再次动态换 Provider。
 
+### Embedding fallback 当前不自动生效
+
+虽然 Deployment 数据模型允许同类型 Embedding Deployment 保存 fallback 关系，但 **当前 Embedding Reindex 不沿该链自动选另一个模型**。
+
+原因是 Embedding generation 必须固定：
+
+```text
+Provider + Base URL + Model + Dimensions
+```
+
+如果目标 Embedding Deployment 不可用，应：
+
+1. 修复该 Deployment / Connection；或
+2. 把 Tenant `Embedding target` 改到另一个明确的 Embedding Deployment；
+3. 再启动新的 Reindex。
+
 ### 推荐策略
 
-优先使用：
+Chat / Rerank fallback 优先使用：
 
 ```text
 同用途、同模型能力级别、不同 Provider / Gateway
@@ -717,7 +745,9 @@ KB Profile
 └─ Reranker         → rerank-primary
 ```
 
-Embedding 不建议自动沿 Chat 风格 fallback 在同一 active index generation 中切换，因为一个 generation 必须固定同一向量空间。当前设计通过 **重新构建新 generation** 来完成 Embedding 供应商/模型切换。
+Chat / Rerank 可以使用显式 fallback。
+
+Embedding 不应在同一 active index generation 中自动切换 Provider/模型；当前实现通过 **明确修改 Embedding target → 重新构建新 generation → 原子激活** 完成切换。
 
 ---
 
@@ -796,7 +826,7 @@ Knowledge Base RAG Profile 与 Model Price API 由 Governance Center 使用；�
 
 ## 17. 故障处理与回滚
 
-### Chat Deployment 故障
+### Chat / Rerank Deployment 故障
 
 优先：
 
@@ -814,9 +844,11 @@ Knowledge Base RAG Profile 与 Model Price API 由 Governance Center 使用；�
 不要修改旧 active generation
 ```
 
-修复 Provider / Credential / Deployment 后重新执行 Reindex。
+修复 Provider / Credential / Deployment，或者明确把 Tenant `Embedding target` 切到另一个 Embedding Deployment，然后重新执行 Reindex。
 
-如果想回到旧 Embedding，应该把 Tenant Embedding target 配回目标 Deployment，再生成一个新的 generation；不要手工拼接两套向量。
+不要依赖 Embedding Deployment 的 fallback 字段自动切换 generation。
+
+如果想回到旧 Embedding，应把 Tenant Embedding target 配回目标 Deployment，再生成一个新的 generation；不要手工拼接两套向量。
 
 ### Credential 泄露
 
@@ -837,7 +869,7 @@ Knowledge Base RAG Profile 与 Model Price API 由 Governance Center 使用；�
 
 - [ ] `SECRET_PROTECTION_MASTER_KEY` 已配置为独立生产 Secret
 - [ ] Base URL 为公网 HTTPS
-- [ ] 没有把 Credential 写入 Git / 日志 / 文档
+- [ ] 没有把 Credential 写入 Git / 日志 /文档
 - [ ] Connection Test 成功
 
 ### Deployment
@@ -846,7 +878,8 @@ Knowledge Base RAG Profile 与 Model Price API 由 Governance Center 使用；�
 - [ ] Embedding Deployment 维度与实际返回一致
 - [ ] Reranker Deployment 与当前 `RERANKER_MODE` 设计一致
 - [ ] 所有生产 Deployment health 为 `healthy`
-- [ ] fallback 仅同类型、无循环
+- [ ] Chat / Rerank fallback 仅同类型、无循环
+- [ ] 没有把 Embedding fallback 当成自动 generation failover
 
 ### Routing
 
@@ -882,11 +915,11 @@ Knowledge Base RAG Profile 与 Model Price API 由 Governance Center 使用；�
 5. 添加 Embedding Deployment + 正确 dimensions
 6. 对 Deployment 做 health check
 7. 配 Tenant Defaults
-8. Governance Center → RAG 配置 → 绑定 Planner / Answer / Reviewer
+8. Governance Center → RAG 配置 → 绑定 Planner / Answer / Reviewer / Reranker
 9. Knowledge Base → Documents → 按当前 Tenant Embedding 重建
 10. 等待新 Embedding generation Active
 11. Cost → 为 Deployment 配价格
 12. Retrieval Lab + RAG Chat + Run Trace + Audit 做上线验证
 ```
 
-如果需要高可用，再在步骤 6 前补充第二 Provider / Deployment，并配置显式 fallback。
+如果需要高可用，再在 Chat / Rerank 上补充第二 Provider / Deployment，并配置显式 fallback；Embedding 高可用通过“明确切 target + 新 generation 重建”处理。
