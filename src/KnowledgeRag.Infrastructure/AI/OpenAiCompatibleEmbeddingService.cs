@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using KnowledgeRag.Domain.Entities;
 using KnowledgeRag.Infrastructure.Configuration;
 using Microsoft.Extensions.Options;
 

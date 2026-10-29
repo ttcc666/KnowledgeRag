@@ -48,7 +48,8 @@ public sealed class TenantAiProviderService(
             entity = await db.Set<AiProviderConnectionEntity>().SingleOrDefaultAsync(x => x.Id == id && x.TenantId == tenantId, ct)
                 ?? throw new KeyNotFoundException("AI Provider Connection 不存在。");
             var activeIndexUsesConnection = await db.KnowledgeBaseIndexGenerations.AnyAsync(x =>
-                x.ProviderConnectionId == id && x.Status == KnowledgeBaseIndexGenerationStatuses.Active, ct);
+                x.ProviderConnectionId == id &&
+                (x.Status == KnowledgeBaseIndexGenerationStatuses.Active || x.Status == KnowledgeBaseIndexGenerationStatuses.Building), ct);
             if (activeIndexUsesConnection && (!request.IsEnabled || !entity.BaseUrl.Equals(baseUrl, StringComparison.Ordinal) ||
                 !entity.ProviderType.Equals(providerType, StringComparison.OrdinalIgnoreCase)))
                 throw new InvalidOperationException("该 Provider Connection 正在服务活动知识库索引。请先切换并完成 Embedding 重建后，再停用或更改 Provider / Base URL；仅轮换凭据不受限制。");

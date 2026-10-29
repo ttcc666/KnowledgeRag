@@ -231,8 +231,8 @@ public sealed class QdrantVectorStore : IVectorStore
             throw new InvalidOperationException($"Qdrant payload index creation failed for '{fieldName}': {raw}");
     }
 
-    private static string CollectionName(Guid indexGenerationId)
-        => indexGenerationId == Guid.Empty ? "knowledge-rag-chunks" : $"knowledge-rag-chunks-{indexGenerationId:N}";
+    private string CollectionName(Guid indexGenerationId)
+        => indexGenerationId == Guid.Empty ? _qdrant.Collection : $"{_qdrant.Collection}-{indexGenerationId:N}";
 
     private static bool HasPayloadIndex(string collectionJson, string fieldName)
     {

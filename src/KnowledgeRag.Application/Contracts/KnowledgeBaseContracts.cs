@@ -8,3 +8,26 @@ public sealed record AddKnowledgeBaseMemberRequest(string Email, KnowledgeBaseRo
 public sealed record KnowledgeBaseSummary(Guid Id, Guid TenantId, string Name, string? Description, KnowledgeBaseRole Role, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
 public sealed record KnowledgeBaseMemberSummary(Guid Id, string Email, string DisplayName, KnowledgeBaseRole Role, DateTimeOffset AddedAt);
 public sealed record UploadResponse(Guid DocumentId, string FileName, int ChunkCount, string Sha256, DocumentStatus Status);
+
+public sealed record KnowledgeBaseIndexGenerationSummary(
+    Guid KnowledgeBaseId,
+    Guid ActiveIndexGenerationId,
+    string ActiveProviderType,
+    string ActiveModelName,
+    int ActiveDimensions,
+    string ActiveDeploymentDisplayName,
+    bool ActiveIsTenantManaged,
+    DateTimeOffset? ActiveSince,
+    Guid? LatestGenerationId,
+    string? LatestStatus,
+    string? LatestProviderType,
+    string? LatestModelName,
+    int? LatestDimensions,
+    string? LatestDeploymentDisplayName,
+    bool? LatestIsTenantManaged,
+    int ExpectedDocumentCount,
+    int CompletedDocumentCount,
+    int FailedDocumentCount,
+    string? FailureReason,
+    DateTimeOffset? LatestCreatedAt,
+    bool IsBuilding);
