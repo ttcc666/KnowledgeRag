@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- 新增知识库级 Embedding 索引代次快照、代次隔离的 pgvector / Qdrant 存储与 BM25/FTS 过滤；重建期间继续查询旧代次，所有文档准备完成且源文档清单未变化后才通过事务切换活动代次。凭据不进入快照，活动 Provider 的 Base URL 变更会被阻止，避免新旧向量空间混用。
+
 本文件用于记录 KnowledgeRag 的重要功能、架构、体验、安全与运维变更。
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)；当前项目尚未建立正式 Release/Tag 流程，因此历史记录按合并 PR / 里程碑倒序整理。

@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using KnowledgeRag.Api.Security;
+using KnowledgeRag.Infrastructure.Documents;
 
 namespace KnowledgeRag.Api.Endpoints;
 
