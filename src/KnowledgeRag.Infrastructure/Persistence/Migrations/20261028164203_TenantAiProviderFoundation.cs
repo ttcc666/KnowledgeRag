@@ -15,18 +15,18 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                 name: "AiProviderConnections",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "TEXT", nullable: false),
-                    TenantId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    Name = table.Column<string>(type: "TEXT", maxLength: 200, nullable: false),
-                    ProviderType = table.Column<string>(type: "TEXT", maxLength: 64, nullable: false),
-                    BaseUrl = table.Column<string>(type: "TEXT", maxLength: 2000, nullable: false),
-                    EncryptedCredential = table.Column<string>(type: "TEXT", maxLength: 4000, nullable: false),
-                    ConfigJson = table.Column<string>(type: "TEXT", maxLength: 8000, nullable: false),
-                    IsEnabled = table.Column<bool>(type: "INTEGER", nullable: false),
-                    Revision = table.Column<int>(type: "INTEGER", nullable: false),
-                    CreatedByUserId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                    UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                    Id = table.Column<Guid>(type: null, nullable: false),
+                    TenantId = table.Column<Guid>(type: null, nullable: false),
+                    Name = table.Column<string>(type: null, maxLength: 200, nullable: false),
+                    ProviderType = table.Column<string>(type: null, maxLength: 64, nullable: false),
+                    BaseUrl = table.Column<string>(type: null, maxLength: 2000, nullable: false),
+                    EncryptedCredential = table.Column<string>(type: null, maxLength: 4000, nullable: false),
+                    ConfigJson = table.Column<string>(type: null, maxLength: 8000, nullable: false),
+                    IsEnabled = table.Column<bool>(type: null, nullable: false),
+                    Revision = table.Column<int>(type: null, nullable: false),
+                    CreatedByUserId = table.Column<Guid>(type: null, nullable: false),
+                    CreatedAt = table.Column<DateTimeOffset>(type: null, nullable: false),
+                    UpdatedAt = table.Column<DateTimeOffset>(type: null, nullable: false)
                 },
                 constraints: table =>
                 {
@@ -49,16 +49,16 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                 name: "AiModelDeployments",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "TEXT", nullable: false),
-                    TenantId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    ConnectionId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    DisplayName = table.Column<string>(type: "TEXT", maxLength: 200, nullable: false),
-                    RemoteModelName = table.Column<string>(type: "TEXT", maxLength: 200, nullable: false),
-                    ModelType = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
-                    EmbeddingDimensions = table.Column<int>(type: "INTEGER", nullable: true),
-                    IsEnabled = table.Column<bool>(type: "INTEGER", nullable: false),
-                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                    UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                    Id = table.Column<Guid>(type: null, nullable: false),
+                    TenantId = table.Column<Guid>(type: null, nullable: false),
+                    ConnectionId = table.Column<Guid>(type: null, nullable: false),
+                    DisplayName = table.Column<string>(type: null, maxLength: 200, nullable: false),
+                    RemoteModelName = table.Column<string>(type: null, maxLength: 200, nullable: false),
+                    ModelType = table.Column<string>(type: null, maxLength: 32, nullable: false),
+                    EmbeddingDimensions = table.Column<int>(type: null, nullable: true),
+                    IsEnabled = table.Column<bool>(type: null, nullable: false),
+                    CreatedAt = table.Column<DateTimeOffset>(type: null, nullable: false),
+                    UpdatedAt = table.Column<DateTimeOffset>(type: null, nullable: false)
                 },
                 constraints: table =>
                 {
@@ -81,12 +81,12 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                 name: "TenantAiDefaults",
                 columns: table => new
                 {
-                    TenantId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    DefaultChatDeploymentId = table.Column<Guid>(type: "TEXT", nullable: true),
-                    DefaultEmbeddingDeploymentId = table.Column<Guid>(type: "TEXT", nullable: true),
-                    DefaultRerankerDeploymentId = table.Column<Guid>(type: "TEXT", nullable: true),
-                    UpdatedByUserId = table.Column<Guid>(type: "TEXT", nullable: false),
-                    UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                    TenantId = table.Column<Guid>(type: null, nullable: false),
+                    DefaultChatDeploymentId = table.Column<Guid>(type: null, nullable: true),
+                    DefaultEmbeddingDeploymentId = table.Column<Guid>(type: null, nullable: true),
+                    DefaultRerankerDeploymentId = table.Column<Guid>(type: null, nullable: true),
+                    UpdatedByUserId = table.Column<Guid>(type: null, nullable: false),
+                    UpdatedAt = table.Column<DateTimeOffset>(type: null, nullable: false)
                 },
                 constraints: table =>
                 {
