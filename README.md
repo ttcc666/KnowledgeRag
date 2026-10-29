@@ -215,10 +215,19 @@ POSTGRES_USER=knowledge_rag
 POSTGRES_PASSWORD=knowledge_rag_dev_password
 ```
 
-启动：
+启动时建议先等 PostgreSQL 健康，再启动应用，避免应用 migration 早于数据库 ready：
 
 ```bash
-docker compose --profile postgres up -d --build
+docker compose --profile postgres up -d postgres
+docker compose --profile postgres up -d --build app
+```
+
+如需 CAP 使用 RabbitMQ，还需设置 `CAP_TRANSPORT=rabbitmq` 并启用 `cap` profile：
+
+```bash
+docker compose --profile postgres --profile cap up -d postgres rabbitmq
+# 等待 PostgreSQL / RabbitMQ ready 后
+docker compose --profile postgres --profile cap up -d --build app
 ```
 
 `pgvector` 模式会初始化：
@@ -257,16 +266,17 @@ S3_SECRET_KEY=minioadmin
 S3_FORCE_PATH_STYLE=true
 ```
 
-启动：
+建议分两步启动，先等 MinIO 可用，再启动应用：
 
 ```bash
-docker compose --profile s3 up -d --build
+docker compose --profile s3 up -d minio
+docker compose --profile s3 up -d --build app
 ```
 
 - S3 API: `http://localhost:9000`
 - MinIO Console: `http://localhost:9001`
 
-`minio-init` 会自动创建 bucket。
+当前 Compose **没有** `minio-init` bucket 初始化服务，`S3FileStorage` 也不会自动创建 bucket。首次使用前，请打开 MinIO Console，使用 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 登录，并手动创建名称与 `S3_BUCKET` 一致的 bucket（默认 `knowledge-rag`）。
 
 `S3FileStorage` 使用 AWS Signature V4，请勿把真实生产密钥写入源码或提交到 Git。
 
