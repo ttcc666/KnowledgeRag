@@ -101,6 +101,11 @@ public sealed class ConversationService(
                     WHERE c."UserId" = {{actor.UserId}}
                       AND c."ApiKeyId" IS NULL
                       AND c."KnowledgeBaseId" = {{knowledgeBaseId.Value}}
+                      AND EXISTS (
+                        SELECT 1 FROM "KnowledgeBaseMembers" kbMember
+                        WHERE kbMember."KnowledgeBaseId" = c."KnowledgeBaseId"
+                          AND kbMember."UserId" = {{actor.UserId}}
+                      )
                       AND (
                         ({{archiveFlag}} = 1 AND EXISTS (
                           SELECT 1 FROM "ChatMessages" m
@@ -119,6 +124,11 @@ public sealed class ConversationService(
                     SELECT c.* FROM "Conversations" c
                     WHERE c."UserId" = {{actor.UserId}}
                       AND c."ApiKeyId" IS NULL
+                      AND EXISTS (
+                        SELECT 1 FROM "KnowledgeBaseMembers" kbMember
+                        WHERE kbMember."KnowledgeBaseId" = c."KnowledgeBaseId"
+                          AND kbMember."UserId" = {{actor.UserId}}
+                      )
                       AND (
                         ({{archiveFlag}} = 1 AND EXISTS (
                           SELECT 1 FROM "ChatMessages" m
@@ -137,7 +147,11 @@ public sealed class ConversationService(
 
         var query = db.Conversations.AsNoTracking().Where(x => x.UserId == actor.UserId);
         query = actor.IsApiKey ? query.Where(x => x.ApiKeyId == actor.ApiKeyId) : query.Where(x => x.ApiKeyId == null);
-        if (knowledgeBaseId.HasValue) query = query.Where(x => x.KnowledgeBaseId == knowledgeBaseId.Value);
+        if (knowledgeBaseId.HasValue)
+            query = query.Where(x => x.KnowledgeBaseId == knowledgeBaseId.Value);
+        if (!actor.IsApiKey)
+            query = query.Where(conversation => db.KnowledgeBaseMembers.Any(member =>
+                member.KnowledgeBaseId == conversation.KnowledgeBaseId && member.UserId == actor.UserId));
         var archivedIds = db.ChatMessages.AsNoTracking()
             .Where(x => x.Role == MetadataRole && x.Content == ArchiveMarker)
             .Select(x => x.ConversationId);
