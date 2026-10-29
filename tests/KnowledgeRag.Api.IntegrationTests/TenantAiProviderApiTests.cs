@@ -12,6 +12,38 @@ public sealed class TenantAiProviderApiTests : IClassFixture<ApiFactory>
     public TenantAiProviderApiTests(ApiFactory factory) => _factory = factory;
 
     [Fact]
+    public async Task Owner_CanActivateEmptyIndexGeneration_AndReadSnapshotWithoutSecrets()
+    {
+        using var client = _factory.CreateClient();
+        var auth = await RegisterAsync(client, $"ai-index-generation-{Guid.NewGuid():N}@example.com");
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", auth.AccessToken);
+        var tenantId = await FirstTenantIdAsync(client);
+        var create = await client.PostAsJsonAsync("/api/knowledge-bases", new { name = "Generation Test", tenantId });
+        create.EnsureSuccessStatusCode();
+        var knowledgeBaseId = (await create.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        var initial = await client.GetFromJsonAsync<JsonElement>($"/api/knowledge-bases/{knowledgeBaseId}/embedding-index");
+        Assert.Equal(Guid.Empty, initial.GetProperty("activeIndexGenerationId").GetGuid());
+
+        using var start = await client.PostAsync($"/api/knowledge-bases/{knowledgeBaseId}/embedding-index/reindex", content: null);
+        Assert.Equal(HttpStatusCode.Accepted, start.StatusCode);
+        var started = await start.Content.ReadFromJsonAsync<JsonElement>();
+        var generationId = started.GetProperty("activeIndexGenerationId").GetGuid();
+
+        Assert.NotEqual(Guid.Empty, generationId);
+        Assert.Equal("active", started.GetProperty("latestStatus").GetString());
+        Assert.Equal(0, started.GetProperty("expectedDocumentCount").GetInt32());
+        Assert.False(started.GetProperty("activeIsTenantManaged").GetBoolean());
+        Assert.Equal("Platform default", started.GetProperty("activeDeploymentDisplayName").GetString());
+
+        var currentBody = await client.GetStringAsync($"/api/knowledge-bases/{knowledgeBaseId}/embedding-index");
+        Assert.DoesNotContain("ApiKey", currentBody, StringComparison.OrdinalIgnoreCase);
+        using var currentDocument = JsonDocument.Parse(currentBody);
+        Assert.Equal(generationId, currentDocument.RootElement.GetProperty("activeIndexGenerationId").GetGuid());
+        Assert.Equal("active", currentDocument.RootElement.GetProperty("latestStatus").GetString());
+    }
+
+    [Fact]
     public async Task Owner_CanConfigureProviderDeploymentAndDefaults_WithoutSecretDisclosure()
     {
         using var client = _factory.CreateClient();
