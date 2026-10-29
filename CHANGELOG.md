@@ -18,6 +18,7 @@
 
 ### Added
 
+- 新增 **KB-scoped Embedding Index Generation**：按知识库保存不可变 Embedding endpoint/model/dimension 快照，pgvector / Qdrant 以 generation 隔离物理向量空间，BM25 / PostgreSQL FTS 同步按 generation 过滤；重建期间查询继续固定旧 active generation，只有全部文档 staging 完成且源文档 manifest 未变化时才原子切换。
 - 新增 **Tenant AI Provider Control Plane**：租户可管理 OpenAI-compatible Provider Connection、加密 Credential、Chat / Embedding / Rerank Model Deployment 与租户默认模型；Chat/Planner/Answer/Reviewer 运行时按租户解析 Provider，未配置租户 Provider 时保持平台级 AI fallback。
 - 新增租户 AI Provider 管理界面与连接验证；Embedding Deployment 本阶段仅作为后续版本化 Reindex 的目标配置，现有 active vector space 不会因租户默认值变化而直接切换。
 - 新增 **Final Answer Citation Gate**：Agent / Reviewer 完成后、SSE 与持久化之前统一执行确定性 Citation normalize/validation；非法 Evidence ID、知识型无有效引用回答均 fail-closed，只向前端暴露答案实际引用的可信 Sources。
@@ -46,6 +47,7 @@
 
 ### Changed
 
+- 租户默认 Embedding Deployment 现在只作为下一次 KB Reindex 的目标；修改默认值不会直接改变当前检索向量空间。活动/构建中的 generation 会固定 provider/model/dimensions 快照，并阻止破坏该快照的 Provider Base URL / disable 操作；凭据轮换仍允许。
 - Tenant-managed AI Provider Base URL 强制使用公网 HTTPS，并复用无 ambient proxy、无 redirect、DNS 公网地址校验与 ConnectCallback pinning 的 SSRF 安全连接策略；Provider Credential 使用独立 purpose 的 AES-GCM 加密且 API 永不返回明文。
 - Chat 主界面继续使用 assistant-ui 官方 registry `Thread` / `ThreadList` / `MarkdownText` / `Sources`；TanStack Query + SSE 作为 External Store 数据适配层，安全的 Agent Workflow 运行状态现在属于当前 assistant turn 并在消息流内呈现，深度 Evidence Panel 仍保持独立侧栏，不展示 Chain of Thought。
 - Chat assistant answer 改用 assistant-ui 官方 `MarkdownTextPrimitive` + GFM 渲染，不再维护手写 Markdown parser；Source Evidence Panel 使用同一标准 Markdown 语义渲染标题、列表、代码块、表格等，同时保持普通链接/远程图片不可交互或加载。
@@ -78,6 +80,7 @@
 
 ### Fixed
 
+- 修复 KB Embedding Index 状态查询在 SQLite 上直接对 `DateTimeOffset` 排序导致 500；SQLite 改用 `julianday(CreatedAt)` 在数据库内取最新 generation，PostgreSQL 保持原生排序。
 - 修复 Tenant AI Provider migration 固定使用 SQLite 的 `TEXT` / `INTEGER` 列类型，导致 PostgreSQL 创建 Tenant 外键时发生 `42804`；Guid / 外键列现在根据 ActiveProvider 明确使用 PostgreSQL `uuid` 或 SQLite `TEXT`，其他列继续采用各 Provider 的原生类型映射。
 - 修复 Tenant AI Provider、Model Deployment 与 Tenant Defaults 表单的 Label 未关联输入控件 / SelectTrigger，导致浏览器无法按标签定位且控件缺少明确可访问名称；新增稳定控件 ID、Label 关联和 Select 的 `aria-labelledby`，并扩展 Playwright 回归覆盖。
 - 优化 Chat Agent Workflow 的消息内视觉层级：运行状态使用轻量引用块与独立阶段摘要呈现，完成阶段采用 `阶段 ✓`、当前阶段采用 `阶段中`，查询/证据统计与当前动作分层展示，减少连续圆点造成的正文感。

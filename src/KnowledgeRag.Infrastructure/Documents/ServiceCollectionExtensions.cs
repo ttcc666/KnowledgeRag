@@ -12,6 +12,7 @@ internal static class ServiceCollectionExtensions
         services.AddSingleton<DocumentParser>();
         services.AddSingleton<TextChunker>();
         services.AddScoped<KnowledgeIngestionService>();
+        services.AddScoped<KnowledgeBaseIndexGenerationService>();
         return services;
     }
 }

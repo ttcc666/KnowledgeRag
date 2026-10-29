@@ -11,6 +11,8 @@ public sealed class KnowledgeBaseEntity
 {
     public Guid Id { get; set; }
     public Guid TenantId { get; set; }
+    /// <summary>Active vector-space generation; Guid.Empty preserves the legacy platform index.</summary>
+    public Guid ActiveIndexGenerationId { get; set; } = Guid.Empty;
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public Guid CreatedByUserId { get; set; }

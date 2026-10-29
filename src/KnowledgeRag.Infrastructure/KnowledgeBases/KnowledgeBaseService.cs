@@ -2,6 +2,7 @@ using KnowledgeRag.Infrastructure.Persistence;
 using KnowledgeRag.Application.Contracts;
 using KnowledgeRag.Application.Security;
 using KnowledgeRag.Domain.Entities;
+using KnowledgeRag.Infrastructure.Documents;
 using Microsoft.EntityFrameworkCore;
 
 namespace KnowledgeRag.Infrastructure.KnowledgeBases;
@@ -11,7 +12,8 @@ public sealed class KnowledgeBaseService(
     KnowledgeBaseAccessService access,
     TenantAccessService tenantAccess,
     IVectorStore vectorStore,
-    IFileStorage fileStorage)
+    IFileStorage fileStorage,
+    KnowledgeBaseIndexGenerationService indexGenerationService)
 {
     public async Task<KnowledgeBaseEntity> CreateAsync(ActorContext actor, CreateKnowledgeBaseRequest request, CancellationToken ct = default)
     {
@@ -118,11 +120,23 @@ public sealed class KnowledgeBaseService(
     public async Task DeleteAsync(ActorContext actor, Guid knowledgeBaseId, CancellationToken ct = default)
     {
         await access.RequireAsync(actor, knowledgeBaseId, KnowledgeBaseRole.Owner, ct);
+        var buildingGenerationIds = await db.KnowledgeBaseIndexGenerations.AsNoTracking()
+            .Where(x => x.KnowledgeBaseId == knowledgeBaseId && x.Status == KnowledgeBaseIndexGenerationStatuses.Building)
+            .Select(x => x.Id)
+            .ToListAsync(ct);
+        foreach (var generationId in buildingGenerationIds)
+            await indexGenerationService.FailAsync(generationId, null, "知识库已删除，索引重建已终止。", ct);
+
         var kb = await db.KnowledgeBases.SingleOrDefaultAsync(x => x.Id == knowledgeBaseId, ct);
         if (kb is null) return;
-        var points = await db.DocumentChunks.AsNoTracking().Where(x => x.KnowledgeBaseId == knowledgeBaseId).Select(x => x.Id).ToListAsync(ct);
+        var generationIds = await db.KnowledgeBaseIndexGenerations.AsNoTracking()
+            .Where(x => x.KnowledgeBaseId == knowledgeBaseId)
+            .Select(x => x.Id)
+            .ToListAsync(ct);
+        await vectorStore.DeleteGenerationAsync(knowledgeBaseId, Guid.Empty, ct);
+        foreach (var generationId in generationIds)
+            await vectorStore.DeleteGenerationAsync(knowledgeBaseId, generationId, ct);
         var files = await db.Documents.AsNoTracking().Where(x => x.KnowledgeBaseId == knowledgeBaseId).Select(x => x.StoredFileName).ToListAsync(ct);
-        await vectorStore.DeleteAsync(points, ct);
         foreach (var file in files) await fileStorage.DeleteAsync(knowledgeBaseId, file, ct);
         db.KnowledgeBases.Remove(kb);
         await db.SaveChangesAsync(ct);

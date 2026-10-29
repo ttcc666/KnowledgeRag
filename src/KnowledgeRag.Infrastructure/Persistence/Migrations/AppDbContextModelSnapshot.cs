@@ -337,6 +337,11 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("DocumentId")
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid>("IndexGenerationId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue(new Guid("00000000-0000-0000-0000-000000000000"));
+
                     b.Property<Guid>("KnowledgeBaseId")
                         .HasColumnType("TEXT");
 
@@ -346,10 +351,10 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("DocumentId", "ChunkIndex")
+                    b.HasIndex("DocumentId", "IndexGenerationId", "ChunkIndex")
                         .IsUnique();
 
-                    b.HasIndex("KnowledgeBaseId", "DocumentId");
+                    b.HasIndex("KnowledgeBaseId", "DocumentId", "IndexGenerationId");
 
                     b.ToTable("DocumentChunks", (string)null);
                 });
@@ -552,6 +557,11 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid>("ActiveIndexGenerationId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue(new Guid("00000000-0000-0000-0000-000000000000"));
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
@@ -580,6 +590,143 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                     b.HasIndex("TenantId", "UpdatedAt");
 
                     b.ToTable("KnowledgeBases", (string)null);
+                });
+
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.KnowledgeBaseIndexGenerationDocumentEntity", b =>
+                {
+                    b.Property<Guid>("IndexGenerationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ChunkCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("IndexGenerationId", "DocumentId");
+
+                    b.HasIndex("DocumentId");
+
+                    b.HasIndex("IndexGenerationId", "Status");
+
+                    b.ToTable("KnowledgeBaseIndexGenerationDocuments", (string)null);
+                });
+
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.KnowledgeBaseIndexGenerationEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ActivatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BaseUrl")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("CompletedDocumentCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ConnectionRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DeploymentDisplayName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("DeploymentUpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Dimensions")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("EmbeddingDeploymentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ExpectedDocumentCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("FailedDocumentCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("KnowledgeBaseId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ManifestHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ModelName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ProviderConnectionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("ProviderConnectionId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("KnowledgeBaseId", "CreatedAt");
+
+                    b.HasIndex("KnowledgeBaseId", "Status");
+
+                    b.ToTable("KnowledgeBaseIndexGenerations", (string)null);
                 });
 
             modelBuilder.Entity("KnowledgeRag.Domain.Entities.KnowledgeBaseMemberEntity", b =>
@@ -1216,6 +1363,47 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("KnowledgeRag.Domain.Entities.KnowledgeBaseEntity", b =>
                 {
+                    b.HasOne("KnowledgeRag.Domain.Entities.TenantEntity", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.KnowledgeBaseIndexGenerationDocumentEntity", b =>
+                {
+                    b.HasOne("KnowledgeRag.Domain.Entities.DocumentEntity", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("KnowledgeRag.Domain.Entities.KnowledgeBaseIndexGenerationEntity", null)
+                        .WithMany()
+                        .HasForeignKey("IndexGenerationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.KnowledgeBaseIndexGenerationEntity", b =>
+                {
+                    b.HasOne("KnowledgeRag.Domain.Entities.UserEntity", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnowledgeRag.Domain.Entities.KnowledgeBaseEntity", null)
+                        .WithMany()
+                        .HasForeignKey("KnowledgeBaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("KnowledgeRag.Domain.Entities.AiProviderConnectionEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ProviderConnectionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("KnowledgeRag.Domain.Entities.TenantEntity", null)
                         .WithMany()
                         .HasForeignKey("TenantId")

@@ -32,6 +32,8 @@ public sealed class DocumentChunkEntity
     public Guid Id { get; set; }
     public Guid KnowledgeBaseId { get; set; }
     public Guid DocumentId { get; set; }
+    /// <summary>Generation namespace for atomic KB-wide index activation.</summary>
+    public Guid IndexGenerationId { get; set; } = Guid.Empty;
     public int ChunkIndex { get; set; }
     public string Text { get; set; } = string.Empty;
     public int CharacterCount { get; set; }

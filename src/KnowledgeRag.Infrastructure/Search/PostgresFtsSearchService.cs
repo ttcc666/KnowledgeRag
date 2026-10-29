@@ -40,7 +40,10 @@ public sealed class PostgresFtsSearchService : ILexicalSearchService
         finally { _initLock.Release(); }
     }
 
-    public async Task<IReadOnlyList<HybridCandidate>> SearchAsync(Guid knowledgeBaseId, string query, int limit, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<HybridCandidate>> SearchAsync(Guid knowledgeBaseId, string query, int limit, CancellationToken cancellationToken = default)
+        => SearchAsync(knowledgeBaseId, Guid.Empty, query, limit, cancellationToken);
+
+    public async Task<IReadOnlyList<HybridCandidate>> SearchAsync(Guid knowledgeBaseId, Guid indexGenerationId, string query, int limit, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(query)) return [];
         await EnsureReadyAsync(cancellationToken);
@@ -54,6 +57,7 @@ public sealed class PostgresFtsSearchService : ILexicalSearchService
             FROM "DocumentChunks" c
             JOIN "Documents" d ON d."Id" = c."DocumentId"
             WHERE c."KnowledgeBaseId" = @kb
+              AND c."IndexGenerationId" = @generation
               AND d."ChunkCount" > 0
               AND to_tsvector('{config}'::regconfig, c."Text") @@ plainto_tsquery('{config}'::regconfig, @query)
             ORDER BY score DESC
@@ -62,6 +66,7 @@ public sealed class PostgresFtsSearchService : ILexicalSearchService
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.AddWithValue("query", query);
         command.Parameters.AddWithValue("kb", knowledgeBaseId);
+        command.Parameters.AddWithValue("generation", indexGenerationId);
         command.Parameters.AddWithValue("limit", Math.Clamp(limit, 1, 1000));
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))

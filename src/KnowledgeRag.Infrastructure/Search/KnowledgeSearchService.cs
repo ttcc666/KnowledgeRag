@@ -4,6 +4,7 @@ using KnowledgeRag.Infrastructure.Persistence;
 using KnowledgeRag.Application.Contracts;
 using KnowledgeRag.Domain.Entities;
 using KnowledgeRag.Infrastructure.Configuration;
+using KnowledgeRag.Infrastructure.Tenancy;
 using KnowledgeRag.Infrastructure.Observability;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -18,7 +19,8 @@ public sealed class KnowledgeSearchService(
     RerankerService reranker,
     ProductMetricsCollector metrics,
     IOptions<RagOptions> options,
-    IOptions<SearchBackendOptions> backendOptions)
+    IOptions<SearchBackendOptions> backendOptions,
+    TenantAiProviderService tenantAiProviderService)
 {
     private readonly RagOptions _options = options.Value;
     private readonly SearchBackendOptions _backend = backendOptions.Value;
@@ -37,13 +39,20 @@ public sealed class KnowledgeSearchService(
         {
             var finalTopK = Math.Clamp(topK ?? _options.TopK, 1, 20);
             activity?.SetTag("rag.top_k", finalTopK);
-            var vector = await embeddings.GenerateAsync(query, cancellationToken);
+            var activeIndexGenerationId = await db.KnowledgeBases.AsNoTracking()
+                .Where(x => x.Id == knowledgeBaseId)
+                .Select(x => (Guid?)x.ActiveIndexGenerationId)
+                .SingleOrDefaultAsync(cancellationToken);
+            if (!activeIndexGenerationId.HasValue) return result;
+            var indexGenerationId = activeIndexGenerationId.Value;
+            var embeddingEndpoint = await tenantAiProviderService.ResolveEmbeddingEndpointForGenerationAsync(knowledgeBaseId, indexGenerationId, cancellationToken);
+            var vector = await embeddings.GenerateAsync(query, embeddingEndpoint, cancellationToken);
             var baseVectorCandidates = Math.Max(finalTopK, _options.VectorCandidateCount);
             // Reindexing stages vectors before the DB activation boundary. Over-fetching gives the
             // resolver room to discard staged/orphaned point ids without reducing active recall.
             var vectorCandidateCount = Math.Clamp(baseVectorCandidates * 2, baseVectorCandidates, 1000);
-            var vectorTask = vectorStore.SearchAsync(vector, knowledgeBaseId, vectorCandidateCount, cancellationToken);
-            var lexicalTask = lexical.SearchAsync(knowledgeBaseId, query, Math.Max(finalTopK, _options.Bm25CandidateCount), cancellationToken);
+            var vectorTask = vectorStore.SearchAsync(vector, knowledgeBaseId, indexGenerationId, vectorCandidateCount, cancellationToken);
+            var lexicalTask = lexical.SearchAsync(knowledgeBaseId, indexGenerationId, query, Math.Max(finalTopK, _options.Bm25CandidateCount), cancellationToken);
             await Task.WhenAll(vectorTask, lexicalTask);
             var vectorHits = await vectorTask;
             var lexicalHits = await lexicalTask;
@@ -54,7 +63,7 @@ public sealed class KnowledgeSearchService(
             if (pointIds.Length == 0) return result;
             var dbChunks = await (from c in db.DocumentChunks.AsNoTracking()
                                   join d in db.Documents.AsNoTracking() on c.DocumentId equals d.Id
-                                  where c.KnowledgeBaseId == knowledgeBaseId && pointIds.Contains(c.Id) && d.ChunkCount > 0
+                                  where c.KnowledgeBaseId == knowledgeBaseId && c.IndexGenerationId == indexGenerationId && pointIds.Contains(c.Id) && d.ChunkCount > 0
                                   select new { c.Id, c.DocumentId, d.FileName, c.ChunkIndex, c.Text }).ToListAsync(cancellationToken);
 
             var data = dbChunks.ToDictionary(x => x.Id);

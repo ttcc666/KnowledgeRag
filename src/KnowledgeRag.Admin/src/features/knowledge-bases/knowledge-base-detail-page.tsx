@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useParams } from '@tanstack/react-router'
-import { Download, FileText, MessageSquareText, Plus, Search, Trash2, UploadCloud, Users, X, Zap } from 'lucide-react'
+import { Download, FileText, MessageSquareText, Plus, RefreshCw, Search, Trash2, UploadCloud, Users, X, Zap } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { toast } from 'sonner'
 import { api, getErrorMessage } from '@/lib/api'
@@ -32,11 +32,77 @@ function DocumentsPanel({ kbId, canEdit }: { kbId: string; canEdit: boolean }) {
   const processingCount = (docs.data || []).filter((d) => d.status === 'Processing' || d.status === 'Queued').length; const readyCount = (docs.data || []).filter((d) => d.status === 'Ready').length; const chunkCount = (docs.data || []).reduce((sum, d) => sum + d.chunkCount, 0)
   const setDropped = (files: FileList | null) => { if (files?.[0]) setFile(files[0]) }
   return <div className='space-y-5'><div className='grid gap-3 sm:grid-cols-3'><MiniMetric label='Ready documents' value={readyCount} hint='可用于检索' /><MiniMetric label='Vector chunks' value={chunkCount.toLocaleString()} hint='已生成 chunk' /><MiniMetric label='Live jobs' value={processingCount} hint={processingCount ? 'CAP 正在后台处理' : '队列空闲'} live={processingCount > 0} /></div>
+    <EmbeddingIndexGenerationPanel kbId={kbId} canEdit={canEdit} />
     {canEdit && <Card className='overflow-hidden bg-card/65'><div onDragEnter={(e) => { e.preventDefault(); setDragging(true) }} onDragOver={(e) => e.preventDefault()} onDragLeave={(e) => { if (e.currentTarget === e.target) setDragging(false) }} onDrop={(e) => { e.preventDefault(); setDragging(false); setDropped(e.dataTransfer.files) }} className={cn('relative m-3 flex min-h-48 flex-col items-center justify-center rounded-2xl border border-dashed p-6 text-center transition sm:m-4', dragging ? 'border-primary bg-primary/7' : 'bg-muted/15 hover:border-primary/30 hover:bg-muted/25')}><input ref={inputRef} type='file' className='hidden' onChange={(e) => setDropped(e.target.files)} /><div className='flex size-12 items-center justify-center rounded-2xl border bg-background shadow-sm'><UploadCloud className='size-5 text-primary' /></div>{file ? <><div className='mt-4 max-w-lg truncate text-sm font-semibold'>{file.name}</div><div className='mt-1 text-xs text-muted-foreground'>{formatBytes(file.size)}</div><div className='mt-4 flex gap-2'><Button variant='outline' size='sm' onClick={() => { setFile(null); if (inputRef.current) inputRef.current.value = '' }}><X className='size-3.5' />移除</Button><Button size='sm' disabled={upload.isPending} onClick={() => upload.mutate()}><Zap className='size-3.5' />{upload.isPending ? '提交中…' : '加入索引队列'}</Button></div></> : <><div className='mt-4 text-sm font-semibold'>拖放文档到这里</div><div className='mt-1 max-w-lg text-xs leading-5 text-muted-foreground'>PDF、DOCX、TXT、Markdown、CSV、JSON、XML、HTML。上传请求快速返回，CAP 会在后台完成解析、Chunk、Embedding 和向量写入。</div><Button variant='outline' size='sm' className='mt-4' onClick={() => inputRef.current?.click()}>选择文件</Button></>}</div></Card>}
     {(docs.data || []).length ? <div className='grid gap-3'>{docs.data?.map((doc) => { const event = events[doc.id]; const progress = event?.progress ?? (doc.status === 'Ready' ? 100 : doc.status === 'Queued' ? 2 : doc.status === 'Processing' ? 18 : 100); return <motion.div layout key={doc.id} className='group rounded-2xl border bg-card/70 p-4 transition hover:border-foreground/10 hover:shadow-md'><div className='flex flex-col gap-4 sm:flex-row sm:items-center'><div className='flex min-w-0 flex-1 items-start gap-3'><div className='flex size-10 shrink-0 items-center justify-center rounded-xl border bg-background'><FileText className='size-4 text-primary' /></div><div className='min-w-0 flex-1'><div className='flex min-w-0 flex-wrap items-center gap-2'><div className='max-w-[520px] truncate text-sm font-semibold'>{doc.fileName}</div><StatusBadge status={doc.status} /></div><div className='mt-1 text-[11px] text-muted-foreground'>{formatBytes(doc.sizeBytes)} · {doc.chunkCount.toLocaleString()} chunks · {formatDate(doc.updatedAt)}</div>{doc.lastError && <div className='mt-2 rounded-lg bg-destructive/8 px-2.5 py-1.5 text-xs text-destructive'>{doc.lastError}</div>}{(doc.status === 'Queued' || doc.status === 'Processing') && <div className='mt-3 max-w-xl'><ProcessingBar progress={progress} stage={event?.stage || doc.status.toLowerCase()} chunkCount={event?.chunkCount} /></div>}</div></div><div className='flex shrink-0 gap-1 self-end sm:self-center'><Button variant='ghost' size='icon-sm' onClick={() => download(doc.id, doc.fileName)} title='下载'><Download className='size-3.5' /></Button>{canEdit && <Button variant='ghost' size='icon-sm' disabled={doc.status === 'Queued' || doc.status === 'Processing'} onClick={() => { if (confirm(`确认删除 ${doc.fileName}？`)) remove.mutate(doc.id) }} title='删除'><Trash2 className='size-3.5 text-destructive' /></Button>}</div></div></motion.div>})}</div> : !docs.isLoading && <EmptyState icon={<FileText className='size-5 text-primary' />} title='还没有文档' description={canEdit ? '拖放第一个文档，构建这个知识库的可检索内容。' : '当前知识库还没有可检索内容。'} />}</div>
 }
 
 function MiniMetric({ label, value, hint, live }: { label: string; value: string | number; hint: string; live?: boolean }) { return <Card className='bg-card/60 p-4'><div className='flex items-center justify-between'><div className='text-[11px] font-medium text-muted-foreground'>{label}</div>{live && <span className='size-2 animate-pulse rounded-full bg-info' />}</div><div className='mt-1.5 text-2xl font-semibold tracking-tight'>{value}</div><div className='mt-1 text-[10px] text-muted-foreground'>{hint}</div></Card> }
+
+function EmbeddingIndexGenerationPanel({ kbId, canEdit }: { kbId: string; canEdit: boolean }) {
+  const qc = useQueryClient()
+  const status = useQuery({
+    queryKey: ['embedding-index-generation', kbId],
+    queryFn: () => api.knowledgeBases.embeddingIndexStatus(kbId),
+    refetchInterval: (query) => query.state.data?.isBuilding ? 3000 : false,
+  })
+  const rebuild = useMutation({
+    mutationFn: () => api.knowledgeBases.rebuildEmbeddingIndex(kbId),
+    onSuccess: async (data) => {
+      toast.success(data.isBuilding ? '索引重建任务已提交' : 'Embedding 索引已切换')
+      await qc.invalidateQueries({ queryKey: ['embedding-index-generation', kbId] })
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
+  })
+  const data = status.data
+  const progress = data?.expectedDocumentCount
+    ? Math.round(100 * data.completedDocumentCount / data.expectedDocumentCount)
+    : 0
+  const state = data?.latestStatus ?? 'legacy'
+  const stateLabel: Record<string, string> = {
+    legacy: '旧索引',
+    building: '重建中',
+    active: '活动代次',
+    failed: '重建失败',
+    superseded: '已替代',
+  }
+
+  return <Card className='bg-card/65 p-5'>
+    <div className='flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between'>
+      <div className='flex min-w-0 items-start gap-3'>
+        <div className='flex size-10 shrink-0 items-center justify-center rounded-xl border bg-background'>
+          <RefreshCw className={cn('size-4 text-primary', data?.isBuilding && 'animate-spin')} />
+        </div>
+        <div className='min-w-0'>
+          <div className='text-sm font-semibold'>Embedding 索引代次</div>
+          <div className='mt-1 text-xs text-muted-foreground'>活动模型：{data?.activeModelName || '读取中…'} · {data?.activeDimensions ?? '—'} 维</div>
+          <div className='mt-1 text-[11px] text-muted-foreground'>
+            {data?.activeDeploymentDisplayName || '读取活动索引配置…'}
+            {data?.activeIsTenantManaged ? ' · 租户托管' : ' · 平台默认'}
+          </div>
+        </div>
+      </div>
+      <Badge variant='outline'>{stateLabel[state] || state}</Badge>
+    </div>
+    {status.isError && <div className='mt-4 rounded-lg bg-destructive/8 px-3 py-2 text-xs text-destructive'>{getErrorMessage(status.error)}</div>}
+    {data?.isBuilding && <div className='mt-4 space-y-2'>
+      <div className='flex items-center justify-between text-[11px] text-muted-foreground'>
+        <span>新代次正在生成文档向量</span>
+        <span className='tabular-nums'>{data.completedDocumentCount}/{data.expectedDocumentCount}</span>
+      </div>
+      <Progress value={progress} />
+      {data.failedDocumentCount > 0 && <div className='text-xs text-destructive'>失败文档：{data.failedDocumentCount}</div>}
+    </div>}
+    {data?.latestStatus === 'failed' && data.failureReason && <div className='mt-4 rounded-lg bg-destructive/8 px-3 py-2 text-xs text-destructive'>{data.failureReason}；旧活动索引保持不变。</div>}
+    <div className='mt-4 flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between'>
+      <p className='max-w-2xl text-[11px] leading-5 text-muted-foreground'>重建期间检索继续使用旧代次。所有文档准备完成且源文档清单未变化后，系统才会原子切换到新向量空间。</p>
+      {canEdit && <Button variant='outline' size='sm' disabled={!data || data.isBuilding || rebuild.isPending || status.isLoading} onClick={() => rebuild.mutate()}>
+        <RefreshCw className={cn('size-3.5', rebuild.isPending && 'animate-spin')} />
+        {rebuild.isPending ? '提交中…' : data?.isBuilding ? '重建中…' : '按当前租户默认 Embedding 重建'}
+      </Button>}
+    </div>
+  </Card>
+}
 
 function SearchPanel({ kbId }: { kbId: string }) {
   const [query, setQuery] = useState(''); const [topK, setTopK] = useState('5'); const [hits, setHits] = useState<SearchHit[]>([]); const [selected, setSelected] = useState<SearchHit | null>(null)

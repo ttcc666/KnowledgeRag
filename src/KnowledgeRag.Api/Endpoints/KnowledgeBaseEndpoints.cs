@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using KnowledgeRag.Api.Security;
+using KnowledgeRag.Infrastructure.Documents;
 
 namespace KnowledgeRag.Api.Endpoints;
 
@@ -14,6 +15,15 @@ public static class KnowledgeBaseEndpoints
 
         group.MapPost("", async (ClaimsPrincipal principal, CreateKnowledgeBaseRequest request, KnowledgeBaseService service, CancellationToken ct) =>
             Results.Ok(await service.CreateAsync(HttpActorContext.From(principal), request, ct)));
+
+        group.MapGet("/{knowledgeBaseId:guid}/embedding-index", async (Guid knowledgeBaseId, ClaimsPrincipal principal, KnowledgeBaseIndexGenerationService service, CancellationToken ct) =>
+            Results.Ok(await service.GetStatusAsync(HttpActorContext.From(principal), knowledgeBaseId, ct)));
+
+        group.MapPost("/{knowledgeBaseId:guid}/embedding-index/reindex", async (Guid knowledgeBaseId, ClaimsPrincipal principal, KnowledgeBaseIndexGenerationService service, CancellationToken ct) =>
+        {
+            var status = await service.StartAsync(HttpActorContext.From(principal), knowledgeBaseId, ct);
+            return Results.Accepted($"/api/knowledge-bases/{knowledgeBaseId}/embedding-index", status);
+        });
 
         group.MapGet("/{knowledgeBaseId:guid}", async (Guid knowledgeBaseId, ClaimsPrincipal principal, KnowledgeBaseService service, CancellationToken ct) =>
         {
