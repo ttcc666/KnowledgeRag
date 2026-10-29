@@ -54,6 +54,41 @@ public static class TenantEndpoints
             return Results.NoContent();
         });
 
+        group.MapGet("/ai/providers", (TenantAiProviderService service) => Results.Ok(service.ListProviderCatalog()));
+
+        group.MapGet("/{tenantId:guid}/ai/connections", async (Guid tenantId, ClaimsPrincipal principal, TenantAiProviderService service, CancellationToken ct) =>
+            Results.Ok(await service.ListConnectionsAsync(HttpActorContext.From(principal), tenantId, ct)));
+
+        group.MapPost("/{tenantId:guid}/ai/connections", async (Guid tenantId, ClaimsPrincipal principal, SaveAiProviderConnectionRequest request, TenantAiProviderService service, CancellationToken ct) =>
+            Results.Ok(await service.SaveConnectionAsync(HttpActorContext.From(principal), tenantId, request, ct)));
+
+        group.MapDelete("/{tenantId:guid}/ai/connections/{connectionId:guid}", async (Guid tenantId, Guid connectionId, ClaimsPrincipal principal, TenantAiProviderService service, CancellationToken ct) =>
+        {
+            await service.DeleteConnectionAsync(HttpActorContext.From(principal), tenantId, connectionId, ct);
+            return Results.NoContent();
+        });
+
+        group.MapPost("/{tenantId:guid}/ai/connections/{connectionId:guid}/test", async (Guid tenantId, Guid connectionId, ClaimsPrincipal principal, TenantAiProviderService service, CancellationToken ct) =>
+            Results.Ok(await service.TestConnectionAsync(HttpActorContext.From(principal), tenantId, connectionId, ct)));
+
+        group.MapGet("/{tenantId:guid}/ai/deployments", async (Guid tenantId, ClaimsPrincipal principal, TenantAiProviderService service, CancellationToken ct) =>
+            Results.Ok(await service.ListDeploymentsAsync(HttpActorContext.From(principal), tenantId, ct)));
+
+        group.MapPost("/{tenantId:guid}/ai/deployments", async (Guid tenantId, ClaimsPrincipal principal, SaveAiModelDeploymentRequest request, TenantAiProviderService service, CancellationToken ct) =>
+            Results.Ok(await service.SaveDeploymentAsync(HttpActorContext.From(principal), tenantId, request, ct)));
+
+        group.MapDelete("/{tenantId:guid}/ai/deployments/{deploymentId:guid}", async (Guid tenantId, Guid deploymentId, ClaimsPrincipal principal, TenantAiProviderService service, CancellationToken ct) =>
+        {
+            await service.DeleteDeploymentAsync(HttpActorContext.From(principal), tenantId, deploymentId, ct);
+            return Results.NoContent();
+        });
+
+        group.MapGet("/{tenantId:guid}/ai/defaults", async (Guid tenantId, ClaimsPrincipal principal, TenantAiProviderService service, CancellationToken ct) =>
+            Results.Ok(await service.GetDefaultsAsync(HttpActorContext.From(principal), tenantId, ct)));
+
+        group.MapPut("/{tenantId:guid}/ai/defaults", async (Guid tenantId, ClaimsPrincipal principal, SaveTenantAiDefaultsRequest request, TenantAiProviderService service, CancellationToken ct) =>
+            Results.Ok(await service.SaveDefaultsAsync(HttpActorContext.From(principal), tenantId, request, ct)));
+
         return app;
     }
 }

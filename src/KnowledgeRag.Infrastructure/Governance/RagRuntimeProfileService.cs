@@ -1,6 +1,8 @@
 using KnowledgeRag.Domain.Entities;
+using KnowledgeRag.Infrastructure.AI;
 using KnowledgeRag.Infrastructure.Configuration;
 using KnowledgeRag.Infrastructure.Persistence;
+using KnowledgeRag.Infrastructure.Tenancy;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -23,15 +25,22 @@ public sealed record ResolvedRagProfile(
     Guid? PromptProfileId,
     string? PlannerPrompt,
     string? AnswerPrompt,
-    string? ReviewerPrompt);
+    string? ReviewerPrompt)
+{
+    public ResolvedAiEndpoint ChatEndpoint { get; init; } = new(
+        null, null, AiProviderTypes.OpenAiCompatible, "https://api.openai.com/v1", string.Empty, "gpt-4o-mini", 0, false);
+    public ResolvedAiEndpoint? RerankerEndpoint { get; init; }
+}
 
 /// <summary>
 /// Resolves an immutable RAG execution snapshot once per scoped request. Conversation budget
 /// reservation, Agent execution and Evaluation therefore observe the exact same model/prompt/policy
-/// values even if an administrator updates the persisted profile concurrently.
+/// values even if an administrator updates the persisted profile or tenant AI connection concurrently.
+/// Provider secrets stay in-memory inside the scoped snapshot and are never persisted to traces.
 /// </summary>
 public sealed class RagRuntimeProfileService(
     AppDbContext db,
+    TenantAiProviderService tenantAiProviders,
     IOptions<AiOptions> aiOptions,
     IOptions<RagOptions> ragOptions)
 {
@@ -42,6 +51,12 @@ public sealed class RagRuntimeProfileService(
     public async Task<ResolvedRagProfile> ResolveAsync(Guid knowledgeBaseId, CancellationToken ct = default)
     {
         if (_resolved.TryGetValue(knowledgeBaseId, out var cached)) return cached;
+
+        var tenantId = await db.KnowledgeBases.AsNoTracking()
+            .Where(x => x.Id == knowledgeBaseId)
+            .Select(x => x.TenantId)
+            .SingleOrDefaultAsync(ct);
+        if (tenantId == Guid.Empty) throw new KeyNotFoundException("知识库不存在。");
 
         var profile = await db.Set<KnowledgeBaseRagProfileEntity>().AsNoTracking()
             .SingleOrDefaultAsync(x => x.KnowledgeBaseId == knowledgeBaseId, ct);
@@ -54,6 +69,20 @@ public sealed class RagRuntimeProfileService(
             .OrderByDescending(x => x.Version)
             .FirstOrDefaultAsync(ct);
 
+        var tenantChat = await tenantAiProviders.ResolveDefaultEndpointAsync(tenantId, AiModelTypes.Chat, ct);
+        var chatEndpoint = tenantChat ?? PlatformChatEndpoint();
+        var rerankerEndpoint = await tenantAiProviders.ResolveDefaultEndpointAsync(tenantId, AiModelTypes.Rerank, ct);
+
+        var plannerModel = string.IsNullOrWhiteSpace(profile?.PlannerModel)
+            ? tenantChat?.Model ?? _ai.ResolvePlannerModel()
+            : profile!.PlannerModel;
+        var answerModel = string.IsNullOrWhiteSpace(profile?.AnswerModel)
+            ? tenantChat?.Model ?? _ai.ResolveAnswerModel()
+            : profile!.AnswerModel;
+        var reviewerModel = string.IsNullOrWhiteSpace(profile?.ReviewerModel)
+            ? tenantChat?.Model ?? _ai.ResolveReviewerModel()
+            : profile!.ReviewerModel;
+
         var resolved = new ResolvedRagProfile(
             profile?.EnablePlanner ?? _rag.EnablePlanner,
             Math.Clamp(profile?.PlannerMaxQueries ?? _rag.PlannerMaxQueries, 1, 6),
@@ -62,16 +91,20 @@ public sealed class RagRuntimeProfileService(
             profile?.EnableReviewer ?? _rag.EnableReviewer,
             Math.Clamp(profile?.ReviewerMaxRetries ?? _rag.ReviewerMaxRetries, 0, 3),
             Math.Clamp(profile?.ReviewerMinConfidence ?? _rag.ReviewerMinConfidence, 0, 1),
-            string.IsNullOrWhiteSpace(profile?.PlannerModel) ? _ai.ResolvePlannerModel() : profile!.PlannerModel,
-            string.IsNullOrWhiteSpace(profile?.AnswerModel) ? _ai.ResolveAnswerModel() : profile!.AnswerModel,
-            string.IsNullOrWhiteSpace(profile?.ReviewerModel) ? _ai.ResolveReviewerModel() : profile!.ReviewerModel,
+            plannerModel,
+            answerModel,
+            reviewerModel,
             string.IsNullOrWhiteSpace(profile?.AgentMode) ? "specialists" : profile!.AgentMode,
             profile?.MonthlyBudgetUsd ?? 0,
             profile?.DailyRunLimit ?? 0,
             profile?.PromptProfileId,
             NullIfWhiteSpace(prompt?.PlannerPrompt),
             AppendMandatoryPolicy(prompt?.AnswerPrompt, AnswerCitationPolicy),
-            AppendMandatoryPolicy(prompt?.ReviewerPrompt, ReviewerCitationPolicy));
+            AppendMandatoryPolicy(prompt?.ReviewerPrompt, ReviewerCitationPolicy))
+        {
+            ChatEndpoint = chatEndpoint,
+            RerankerEndpoint = rerankerEndpoint
+        };
 
         _resolved[knowledgeBaseId] = resolved;
         return resolved;
@@ -90,6 +123,9 @@ public sealed class RagRuntimeProfileService(
         var outputRate = price?.OutputCostPerMillionTokens ?? _ai.ChatOutputCostPerMillionTokens;
         return inputTokens / 1_000_000m * inputRate + outputTokens / 1_000_000m * outputRate;
     }
+
+    private ResolvedAiEndpoint PlatformChatEndpoint()
+        => new(null, null, AiProviderTypes.OpenAiCompatible, _ai.BaseUrl, _ai.ApiKey, _ai.ChatModel, 0, false);
 
     private static string? NullIfWhiteSpace(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 

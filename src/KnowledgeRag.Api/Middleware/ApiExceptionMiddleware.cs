@@ -1,3 +1,5 @@
+using KnowledgeRag.Infrastructure.Governance;
+
 namespace KnowledgeRag.Api.Middleware;
 
 public sealed class ApiExceptionMiddleware(RequestDelegate next, ILogger<ApiExceptionMiddleware> logger)
@@ -15,6 +17,10 @@ public sealed class ApiExceptionMiddleware(RequestDelegate next, ILogger<ApiExce
         catch (KeyNotFoundException ex)
         {
             await WriteErrorAsync(context, StatusCodes.Status404NotFound, ex.Message);
+        }
+        catch (WebhookDestinationBlockedException ex)
+        {
+            await WriteErrorAsync(context, StatusCodes.Status400BadRequest, ex.Message);
         }
         catch (InvalidOperationException ex)
         {

@@ -1,11 +1,12 @@
 import axios, { AxiosError, type AxiosRequestConfig } from 'axios'
 import { useAuthStore } from '@/stores/auth-store'
 import type {
-  ApiKeySummary, AuditLog, AuthResponse, ChatMessage, ChatMessagePage, ChatResponse, Conversation, CreatedApiKey,
-  DashboardSummary, EvaluationCase, EvaluationDataset, EvaluationExpectedSource, EvaluationRun, GovernanceOverview, IngestionJobSummary,
-  KnowledgeBaseMember, KnowledgeBaseSummary, KnowledgeDocument, ModelPrice, ProductSettingsSummary, PromptProfile,
-  RagProfile, RagProfileUpdate, RagProgressEvent, RagRun, SearchHit, TenantMember, TenantSummary, UploadResponse,
-  UserSummary, WebhookProvider, WebhookSubscription,
+  AiConnectionTestResult, AiModelDeployment, AiModelType, AiProviderConnection, AiProviderDescriptor, ApiKeySummary, AuditLog,
+  AuthResponse, ChatMessage, ChatMessagePage, ChatResponse, Conversation, CreatedApiKey, DashboardSummary, EvaluationCase,
+  EvaluationDataset, EvaluationExpectedSource, EvaluationRun, GovernanceOverview, IngestionJobSummary, KnowledgeBaseMember,
+  KnowledgeBaseSummary, KnowledgeDocument, ModelPrice, ProductSettingsSummary, PromptProfile, RagProfile, RagProfileUpdate,
+  RagProgressEvent, RagRun, SearchHit, TenantAiDefaults, TenantMember, TenantSummary, UploadResponse, UserSummary,
+  WebhookProvider, WebhookSubscription,
 } from './types'
 
 const baseURL = import.meta.env.VITE_API_BASE_URL || ''
@@ -54,7 +55,26 @@ async function streamConversation(
 
 export const api = {
   auth: { register: async (body: { email: string; password: string; displayName?: string }) => (await http.post<AuthResponse>('/api/auth/register', body)).data, login: async (body: { email: string; password: string }) => (await http.post<AuthResponse>('/api/auth/login', body)).data, me: async () => (await http.get<UserSummary>('/api/auth/me')).data, logout: async (refreshToken: string) => { if (refreshToken) await http.post('/api/auth/logout', { refreshToken }) } },
-  tenants: { list: async () => (await http.get<TenantSummary[]>('/api/tenants')).data, create: async (name: string) => (await http.post<TenantSummary>('/api/tenants', { name })).data, members: async (tenantId: string) => (await http.get<TenantMember[]>(`/api/tenants/${tenantId}/members`)).data, saveMember: async (tenantId: string, email: string, role: string) => { await http.put(`/api/tenants/${tenantId}/members`, { email, role }) }, removeMember: async (tenantId: string, userId: string) => { await http.delete(`/api/tenants/${tenantId}/members/${userId}`) }, apiKeys: async (tenantId: string) => (await http.get<ApiKeySummary[]>(`/api/tenants/${tenantId}/api-keys`)).data, createApiKey: async (tenantId: string, body: { name: string; scopes: string[]; knowledgeBaseId?: string | null; expiresAt?: string | null }) => (await http.post<CreatedApiKey>(`/api/tenants/${tenantId}/api-keys`, body)).data, revokeApiKey: async (tenantId: string, id: string) => { await http.delete(`/api/tenants/${tenantId}/api-keys/${id}`) } },
+  tenants: {
+    list: async () => (await http.get<TenantSummary[]>('/api/tenants')).data,
+    create: async (name: string) => (await http.post<TenantSummary>('/api/tenants', { name })).data,
+    members: async (tenantId: string) => (await http.get<TenantMember[]>(`/api/tenants/${tenantId}/members`)).data,
+    saveMember: async (tenantId: string, email: string, role: string) => { await http.put(`/api/tenants/${tenantId}/members`, { email, role }) },
+    removeMember: async (tenantId: string, userId: string) => { await http.delete(`/api/tenants/${tenantId}/members/${userId}`) },
+    apiKeys: async (tenantId: string) => (await http.get<ApiKeySummary[]>(`/api/tenants/${tenantId}/api-keys`)).data,
+    createApiKey: async (tenantId: string, body: { name: string; scopes: string[]; knowledgeBaseId?: string | null; expiresAt?: string | null }) => (await http.post<CreatedApiKey>(`/api/tenants/${tenantId}/api-keys`, body)).data,
+    revokeApiKey: async (tenantId: string, id: string) => { await http.delete(`/api/tenants/${tenantId}/api-keys/${id}`) },
+    aiProviders: async () => (await http.get<AiProviderDescriptor[]>('/api/tenants/ai/providers')).data,
+    aiConnections: async (tenantId: string) => (await http.get<AiProviderConnection[]>(`/api/tenants/${tenantId}/ai/connections`)).data,
+    saveAiConnection: async (tenantId: string, body: { id?: string | null; name: string; providerType: string; baseUrl: string; credential?: string | null; isEnabled: boolean }) => (await http.post<AiProviderConnection>(`/api/tenants/${tenantId}/ai/connections`, body)).data,
+    deleteAiConnection: async (tenantId: string, id: string) => { await http.delete(`/api/tenants/${tenantId}/ai/connections/${id}`) },
+    testAiConnection: async (tenantId: string, id: string) => (await http.post<AiConnectionTestResult>(`/api/tenants/${tenantId}/ai/connections/${id}/test`)).data,
+    aiDeployments: async (tenantId: string) => (await http.get<AiModelDeployment[]>(`/api/tenants/${tenantId}/ai/deployments`)).data,
+    saveAiDeployment: async (tenantId: string, body: { id?: string | null; connectionId: string; displayName: string; remoteModelName: string; modelType: AiModelType; embeddingDimensions?: number | null; isEnabled: boolean }) => (await http.post<AiModelDeployment>(`/api/tenants/${tenantId}/ai/deployments`, body)).data,
+    deleteAiDeployment: async (tenantId: string, id: string) => { await http.delete(`/api/tenants/${tenantId}/ai/deployments/${id}`) },
+    aiDefaults: async (tenantId: string) => (await http.get<TenantAiDefaults>(`/api/tenants/${tenantId}/ai/defaults`)).data,
+    saveAiDefaults: async (tenantId: string, body: { defaultChatDeploymentId?: string | null; defaultEmbeddingDeploymentId?: string | null; defaultRerankerDeploymentId?: string | null }) => (await http.put<TenantAiDefaults>(`/api/tenants/${tenantId}/ai/defaults`, body)).data,
+  },
   knowledgeBases: { list: async () => (await http.get<KnowledgeBaseSummary[]>('/api/knowledge-bases')).data, create: async (body: { name: string; description?: string; tenantId?: string }) => (await http.post<KnowledgeBaseSummary>('/api/knowledge-bases', body)).data, update: async (id: string, body: { name: string; description?: string }) => { await http.put(`/api/knowledge-bases/${id}`, body) }, remove: async (id: string) => { await http.delete(`/api/knowledge-bases/${id}`) }, members: async (id: string) => (await http.get<KnowledgeBaseMember[]>(`/api/knowledge-bases/${id}/members`)).data, saveMember: async (id: string, email: string, role: string) => { await http.put(`/api/knowledge-bases/${id}/members`, { email, role }) }, removeMember: async (id: string, userId: string) => { await http.delete(`/api/knowledge-bases/${id}/members/${userId}`) } },
   documents: { list: async (kbId: string) => (await http.get<KnowledgeDocument[]>(`/api/knowledge-bases/${kbId}/documents`)).data, upload: async (kbId: string, file: File) => { const form = new FormData(); form.append('file', file); return (await http.post<UploadResponse>(`/api/knowledge-bases/${kbId}/documents`, form)).data }, remove: async (kbId: string, id: string) => { await http.delete(`/api/knowledge-bases/${kbId}/documents/${id}`) }, retry: async (kbId: string, id: string) => { await http.post(`/api/knowledge-bases/${kbId}/documents/${id}/retry`) }, reindex: async (kbId: string, id: string) => { await http.post(`/api/knowledge-bases/${kbId}/documents/${id}/reindex`) }, cancel: async (kbId: string, id: string) => { await http.post(`/api/knowledge-bases/${kbId}/documents/${id}/cancel`) }, download: async (kbId: string, id: string) => (await http.get(`/api/knowledge-bases/${kbId}/documents/${id}/file`, { responseType: 'blob' })).data as Blob },
   dashboard: async () => (await http.get<DashboardSummary>('/api/dashboard')).data,

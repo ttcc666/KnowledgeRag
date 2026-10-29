@@ -1,8 +1,6 @@
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using KnowledgeRag.Application.Contracts;
-using KnowledgeRag.Application.Security;
 using KnowledgeRag.Domain.Entities;
 using KnowledgeRag.Infrastructure.Configuration;
 using Microsoft.Extensions.Logging;
@@ -10,36 +8,27 @@ using Microsoft.Extensions.Options;
 
 namespace KnowledgeRag.Infrastructure.AI;
 
-public sealed class OpenAiCompatibleRerankerService
+public sealed class OpenAiCompatibleRerankerService(
+    AiProviderClientFactory clientFactory,
+    IOptions<AiOptions> ai,
+    IOptions<RerankerOptions> options,
+    ILogger<OpenAiCompatibleRerankerService> logger)
 {
-    private readonly HttpClient _httpClient;
-    private readonly AiOptions _ai;
-    private readonly RerankerOptions _options;
-    private readonly ILogger<OpenAiCompatibleRerankerService> _logger;
-
-    public OpenAiCompatibleRerankerService(
-        HttpClient httpClient,
-        IOptions<AiOptions> ai,
-        IOptions<RerankerOptions> options,
-        ILogger<OpenAiCompatibleRerankerService> logger)
-    {
-        _httpClient = httpClient;
-        _ai = ai.Value;
-        _options = options.Value;
-        _logger = logger;
-        _httpClient.BaseAddress = new Uri(_ai.BaseUrl.TrimEnd('/') + "/");
-        if (!string.IsNullOrWhiteSpace(_ai.ApiKey))
-            _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _ai.ApiKey);
-    }
+    private readonly AiOptions _ai = ai.Value;
+    private readonly RerankerOptions _options = options.Value;
 
     public async Task<IReadOnlyDictionary<Guid, double>> RerankAsync(
         string query,
         IReadOnlyList<HybridCandidate> candidates,
+        ResolvedAiEndpoint? endpoint = null,
         CancellationToken cancellationToken = default)
     {
         if (candidates.Count == 0) return new Dictionary<Guid, double>();
 
-        var model = string.IsNullOrWhiteSpace(_options.Model) ? _ai.ChatModel : _options.Model;
+        var fallbackModel = string.IsNullOrWhiteSpace(_options.Model) ? _ai.ChatModel : _options.Model;
+        var effective = endpoint ?? new ResolvedAiEndpoint(
+            null, null, AiProviderTypes.OpenAiCompatible, _ai.BaseUrl, _ai.ApiKey, fallbackModel, 0, false);
+        var model = string.IsNullOrWhiteSpace(effective.Model) ? fallbackModel : effective.Model;
         var promptItems = candidates.Select((x, i) => new
         {
             id = x.PointId,
@@ -62,7 +51,10 @@ public sealed class OpenAiCompatibleRerankerService
 
         try
         {
-            using var response = await _httpClient.PostAsJsonAsync("chat/completions", payload, cancellationToken);
+            using var client = clientFactory.CreateHttpClient(effective);
+            using var request = clientFactory.CreateJsonRequest(effective, HttpMethod.Post, "chat/completions");
+            request.Content = JsonContent.Create(payload);
+            using var response = await client.SendAsync(request, cancellationToken);
             var raw = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
                 throw new InvalidOperationException($"Reranker API failed ({(int)response.StatusCode}): {raw}");
@@ -90,7 +82,7 @@ public sealed class OpenAiCompatibleRerankerService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "LLM reranker failed; local reranking will be used as fallback.");
+            logger.LogWarning(ex, "LLM reranker failed; local reranking will be used as fallback.");
             return new Dictionary<Guid, double>();
         }
     }

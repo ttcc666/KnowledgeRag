@@ -18,6 +18,8 @@
 
 ### Added
 
+- 新增 **Tenant AI Provider Control Plane**：租户可管理 OpenAI-compatible Provider Connection、加密 Credential、Chat / Embedding / Rerank Model Deployment 与租户默认模型；Chat/Planner/Answer/Reviewer 运行时按租户解析 Provider，未配置租户 Provider 时保持平台级 AI fallback。
+- 新增租户 AI Provider 管理界面与连接验证；Embedding Deployment 本阶段仅作为后续版本化 Reindex 的目标配置，现有 active vector space 不会因租户默认值变化而直接切换。
 - 新增 **Final Answer Citation Gate**：Agent / Reviewer 完成后、SSE 与持久化之前统一执行确定性 Citation normalize/validation；非法 Evidence ID、知识型无有效引用回答均 fail-closed，只向前端暴露答案实际引用的可信 Sources。
 - 新增 **Evidence Context Budget**：RAG 增加总 Evidence token budget 与单文档 token budget，按最终排序确定性截断上下文，限制 Multi-query / Repair 造成的上下文与成本膨胀。
 - 新增 **Evaluation v3 Retrieval Metrics**：Case 可选标注 expected source（文件名 + 可选 chunk），确定性计算 Hit Rate、Recall@K、MRR、nDCG；`ResultsJson` 升级为 `schemaVersion=3` / `evaluatorVersion=retrieval-citation-v3`，并将检索指标写入 Case、分类汇总和 `evaluation.completed` webhook 元数据。
@@ -44,6 +46,7 @@
 
 ### Changed
 
+- Tenant-managed AI Provider Base URL 强制使用公网 HTTPS，并复用无 ambient proxy、无 redirect、DNS 公网地址校验与 ConnectCallback pinning 的 SSRF 安全连接策略；Provider Credential 使用独立 purpose 的 AES-GCM 加密且 API 永不返回明文。
 - Chat 主界面继续使用 assistant-ui 官方 registry `Thread` / `ThreadList` / `MarkdownText` / `Sources`；TanStack Query + SSE 作为 External Store 数据适配层，安全的 Agent Workflow 运行状态现在属于当前 assistant turn 并在消息流内呈现，深度 Evidence Panel 仍保持独立侧栏，不展示 Chain of Thought。
 - Chat assistant answer 改用 assistant-ui 官方 `MarkdownTextPrimitive` + GFM 渲染，不再维护手写 Markdown parser；Source Evidence Panel 使用同一标准 Markdown 语义渲染标题、列表、代码块、表格等，同时保持普通链接/远程图片不可交互或加载。
 - RAG Profile 在同一 scoped request 内只解析一次 execution snapshot；Budget Reservation、Agent 执行与 Evaluation 使用一致的模型、Prompt、检索和 Reviewer 配置，避免并发配置修改造成预留与实际执行快照不一致。
@@ -75,6 +78,8 @@
 
 ### Fixed
 
+- 修复 Tenant AI Provider migration 固定使用 SQLite 的 `TEXT` / `INTEGER` 列类型，导致 PostgreSQL 创建 Tenant 外键时发生 `42804`；Guid / 外键列现在根据 ActiveProvider 明确使用 PostgreSQL `uuid` 或 SQLite `TEXT`，其他列继续采用各 Provider 的原生类型映射。
+- 修复 Tenant AI Provider、Model Deployment 与 Tenant Defaults 表单的 Label 未关联输入控件 / SelectTrigger，导致浏览器无法按标签定位且控件缺少明确可访问名称；新增稳定控件 ID、Label 关联和 Select 的 `aria-labelledby`，并扩展 Playwright 回归覆盖。
 - 优化 Chat Agent Workflow 的消息内视觉层级：运行状态使用轻量引用块与独立阶段摘要呈现，完成阶段采用 `阶段 ✓`、当前阶段采用 `阶段中`，查询/证据统计与当前动作分层展示，减少连续圆点造成的正文感。
 - 优化回答底部 References：仅第一条显示一次“参考来源”，每个来源改为紧凑的 `[n] 文件名` 链接并增加稳定间距/换行，不再为每条重复“引用”和文件图标；点击仍打开当前 assistant message 对应的 Evidence Panel。
 - 修复 Chat Header 与 assistant turn 重复显示运行状态的问题；Agent Workflow 只在当前回答消息内以紧凑两行摘要呈现，通用 running indicator 仅保留无障碍文本，不再出现额外圆点。

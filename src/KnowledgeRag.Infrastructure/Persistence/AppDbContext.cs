@@ -8,6 +8,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<UserEntity> Users => Set<UserEntity>();
     public DbSet<TenantEntity> Tenants => Set<TenantEntity>();
     public DbSet<TenantMemberEntity> TenantMembers => Set<TenantMemberEntity>();
+    public DbSet<AiProviderConnectionEntity> AiProviderConnections => Set<AiProviderConnectionEntity>();
+    public DbSet<AiModelDeploymentEntity> AiModelDeployments => Set<AiModelDeploymentEntity>();
+    public DbSet<TenantAiDefaultsEntity> TenantAiDefaults => Set<TenantAiDefaultsEntity>();
     public DbSet<RefreshTokenEntity> RefreshTokens => Set<RefreshTokenEntity>();
     public DbSet<ApiKeyEntity> ApiKeys => Set<ApiKeyEntity>();
     public DbSet<KnowledgeBaseEntity> KnowledgeBases => Set<KnowledgeBaseEntity>();
@@ -58,6 +61,45 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasIndex(x => x.UserId);
             entity.HasOne<TenantEntity>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne<UserEntity>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AiProviderConnectionEntity>(entity =>
+        {
+            entity.ToTable("AiProviderConnections");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Name).HasMaxLength(200);
+            entity.Property(x => x.ProviderType).HasMaxLength(64);
+            entity.Property(x => x.BaseUrl).HasMaxLength(2000);
+            entity.Property(x => x.EncryptedCredential).HasMaxLength(4000);
+            entity.Property(x => x.ConfigJson).HasMaxLength(8000);
+            entity.HasIndex(x => new { x.TenantId, x.Name }).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.IsEnabled });
+            entity.HasOne<TenantEntity>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<UserEntity>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<AiModelDeploymentEntity>(entity =>
+        {
+            entity.ToTable("AiModelDeployments");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.DisplayName).HasMaxLength(200);
+            entity.Property(x => x.RemoteModelName).HasMaxLength(200);
+            entity.Property(x => x.ModelType).HasMaxLength(32);
+            entity.HasIndex(x => new { x.TenantId, x.ModelType, x.IsEnabled });
+            entity.HasIndex(x => new { x.TenantId, x.ConnectionId, x.DisplayName }).IsUnique();
+            entity.HasOne<TenantEntity>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<AiProviderConnectionEntity>().WithMany().HasForeignKey(x => x.ConnectionId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<TenantAiDefaultsEntity>(entity =>
+        {
+            entity.ToTable("TenantAiDefaults");
+            entity.HasKey(x => x.TenantId);
+            entity.HasOne<TenantEntity>().WithOne().HasForeignKey<TenantAiDefaultsEntity>(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<AiModelDeploymentEntity>().WithMany().HasForeignKey(x => x.DefaultChatDeploymentId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<AiModelDeploymentEntity>().WithMany().HasForeignKey(x => x.DefaultEmbeddingDeploymentId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<AiModelDeploymentEntity>().WithMany().HasForeignKey(x => x.DefaultRerankerDeploymentId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<UserEntity>().WithMany().HasForeignKey(x => x.UpdatedByUserId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<RefreshTokenEntity>(entity =>

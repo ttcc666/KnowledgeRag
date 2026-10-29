@@ -1,6 +1,7 @@
 export type TenantRole = 'Member' | 'Admin' | 'Owner'
 export type KnowledgeBaseRole = 'Viewer' | 'Editor' | 'Owner'
 export type DocumentStatus = 'Queued' | 'Processing' | 'Ready' | 'Failed' | 'Cancelled'
+export type AiModelType = 'chat' | 'embedding' | 'rerank'
 
 export interface UserSummary { id: string; email: string; displayName: string }
 export interface AuthResponse { accessToken: string; expiresAt: string; refreshToken: string; refreshExpiresAt: string; user: UserSummary }
@@ -31,6 +32,11 @@ export interface ChatMessage { id: string; role: string; content: string; source
 export interface ChatMessagePage { messages: ChatMessage[]; hasEarlier: boolean; previousCursor?: string | null }
 export interface ApiKeySummary { id: string; name: string; keyPrefix: string; scopes: string[]; knowledgeBaseId?: string | null; isActive: boolean; createdAt: string; expiresAt?: string | null; lastUsedAt?: string | null }
 export interface CreatedApiKey { id: string; name: string; apiKey: string; scopes: string[]; knowledgeBaseId?: string | null; expiresAt?: string | null }
+export interface AiProviderDescriptor { id: string; name: string; description: string; supportsCustomBaseUrl: boolean }
+export interface AiProviderConnection { id: string; tenantId: string; name: string; providerType: string; baseUrl: string; hasCredential: boolean; isEnabled: boolean; revision: number; updatedAt: string }
+export interface AiModelDeployment { id: string; tenantId: string; connectionId: string; connectionName: string; displayName: string; remoteModelName: string; modelType: AiModelType; embeddingDimensions?: number | null; isEnabled: boolean; updatedAt: string }
+export interface TenantAiDefaults { tenantId: string; defaultChatDeploymentId?: string | null; defaultEmbeddingDeploymentId?: string | null; defaultRerankerDeploymentId?: string | null; updatedAt?: string | null }
+export interface AiConnectionTestResult { success: boolean; message: string }
 
 export interface DailyActivityPoint { date: string; documents: number; conversations: number }
 export interface IngestionJobSummary { documentId: string; knowledgeBaseId: string; knowledgeBaseName: string; fileName: string; status: DocumentStatus; chunkCount: number; lastError?: string | null; createdAt: string; updatedAt: string; elapsedSeconds: number; queuePosition?: number | null }

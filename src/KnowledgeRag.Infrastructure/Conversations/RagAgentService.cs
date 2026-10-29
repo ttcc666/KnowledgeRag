@@ -21,6 +21,7 @@ public sealed class RagAgentService(
     MultiQuerySearchService multiQuerySearch,
     ProductMetricsCollector metrics,
     RagRuntimeProfileService runtimeProfiles,
+    AiProviderClientFactory aiClientFactory,
     IOptions<AiOptions> aiOptions,
     IOptions<RagOptions> ragOptions)
 {
@@ -258,7 +259,8 @@ public sealed class RagAgentService(
             profile.PlannerMaxQueries,
             profile.MultiQueryTopK,
             profile.MaxMergedEvidence,
-            Math.Min(profile.MultiQueryTopK, profile.MaxMergedEvidence));
+            Math.Min(profile.MultiQueryTopK, profile.MaxMergedEvidence),
+            rerankerEndpoint: profile.RerankerEndpoint);
 
         activity?.SetTag("rag.retrieve.evidence_count", hits.Count);
         await ReportProgressAsync(state, "retrieval", "stage.completed", "MultiQuerySearchService", "检索、融合与重排完成", "completed",
@@ -381,7 +383,8 @@ public sealed class RagAgentService(
                 profile.PlannerMaxQueries,
                 profile.MultiQueryTopK,
                 profile.MaxMergedEvidence,
-                Math.Min(profile.MultiQueryTopK, profile.MaxMergedEvidence));
+                Math.Min(profile.MultiQueryTopK, profile.MaxMergedEvidence),
+            rerankerEndpoint: profile.RerankerEndpoint);
             var merged = RagWorkflowPolicy.MergeEvidence(current.SafeEvidence, supplemental, profile.MaxMergedEvidence);
             current = current with { Evidence = merged, RetrievalRound = current.RetrievalRound + 1 };
             await ReportProgressAsync(current, "retrieval", "stage.completed", "MultiQuerySearchService", "补充检索完成", "completed",
@@ -540,9 +543,7 @@ public sealed class RagAgentService(
 
     private AIAgent BuildAgent(string name, string model, string instructions, IList<AITool>? tools = null)
     {
-        var credential = new ApiKeyCredential(string.IsNullOrWhiteSpace(_ai.ApiKey) ? "local-development-key" : _ai.ApiKey);
-        var clientOptions = new OpenAIClientOptions { Endpoint = new Uri(_ai.BaseUrl.TrimEnd('/') + "/") };
-        var chatClient = new ChatClient(model, credential, clientOptions);
+        var chatClient = aiClientFactory.CreateChatClient(Profile.ChatEndpoint, model);
         return chatClient.AsAIAgent(new ChatClientAgentOptions
         {
             Name = name,

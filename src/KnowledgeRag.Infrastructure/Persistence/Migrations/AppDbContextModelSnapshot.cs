@@ -17,6 +17,118 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.14");
 
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.AiModelDeploymentEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ConnectionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("EmbeddingDimensions")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ModelType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RemoteModelName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConnectionId");
+
+                    b.HasIndex("TenantId", "ConnectionId", "DisplayName")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "ModelType", "IsEnabled");
+
+                    b.ToTable("AiModelDeployments", (string)null);
+                });
+
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.AiProviderConnectionEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BaseUrl")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConfigJson")
+                        .IsRequired()
+                        .HasMaxLength(8000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EncryptedCredential")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProviderType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("TenantId", "IsEnabled");
+
+                    b.HasIndex("TenantId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("AiProviderConnections", (string)null);
+                });
+
             modelBuilder.Entity("KnowledgeRag.Domain.Entities.ApiKeyEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -767,6 +879,39 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                     b.ToTable("RefreshTokens", (string)null);
                 });
 
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.TenantAiDefaultsEntity", b =>
+                {
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DefaultChatDeploymentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DefaultEmbeddingDeploymentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DefaultRerankerDeploymentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UpdatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("TenantId");
+
+                    b.HasIndex("DefaultChatDeploymentId");
+
+                    b.HasIndex("DefaultEmbeddingDeploymentId");
+
+                    b.HasIndex("DefaultRerankerDeploymentId");
+
+                    b.HasIndex("UpdatedByUserId");
+
+                    b.ToTable("TenantAiDefaults", (string)null);
+                });
+
             modelBuilder.Entity("KnowledgeRag.Domain.Entities.TenantEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -931,6 +1076,36 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                     b.HasIndex("TenantId", "IsActive");
 
                     b.ToTable("WebhookSubscriptions", (string)null);
+                });
+
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.AiModelDeploymentEntity", b =>
+                {
+                    b.HasOne("KnowledgeRag.Domain.Entities.AiProviderConnectionEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ConnectionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("KnowledgeRag.Domain.Entities.TenantEntity", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.AiProviderConnectionEntity", b =>
+                {
+                    b.HasOne("KnowledgeRag.Domain.Entities.UserEntity", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnowledgeRag.Domain.Entities.TenantEntity", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("KnowledgeRag.Domain.Entities.ApiKeyEntity", b =>
@@ -1121,6 +1296,36 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KnowledgeRag.Domain.Entities.TenantAiDefaultsEntity", b =>
+                {
+                    b.HasOne("KnowledgeRag.Domain.Entities.AiModelDeploymentEntity", null)
+                        .WithMany()
+                        .HasForeignKey("DefaultChatDeploymentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("KnowledgeRag.Domain.Entities.AiModelDeploymentEntity", null)
+                        .WithMany()
+                        .HasForeignKey("DefaultEmbeddingDeploymentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("KnowledgeRag.Domain.Entities.AiModelDeploymentEntity", null)
+                        .WithMany()
+                        .HasForeignKey("DefaultRerankerDeploymentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("KnowledgeRag.Domain.Entities.TenantEntity", null)
+                        .WithOne()
+                        .HasForeignKey("KnowledgeRag.Domain.Entities.TenantAiDefaultsEntity", "TenantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("KnowledgeRag.Domain.Entities.UserEntity", null)
+                        .WithMany()
+                        .HasForeignKey("UpdatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 

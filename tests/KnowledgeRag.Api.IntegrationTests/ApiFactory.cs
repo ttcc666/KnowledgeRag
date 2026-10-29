@@ -28,6 +28,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         Environment.SetEnvironmentVariable("Storage__RootPath", _rootPath);
         Environment.SetEnvironmentVariable("OpenTelemetry__Enabled", "false");
         Environment.SetEnvironmentVariable("Auth__SigningKey", "integration-test-signing-key-that-is-longer-than-32-bytes");
+        Environment.SetEnvironmentVariable("SecretProtection__MasterKey", "integration-test-secret-protection-key-that-is-longer-than-32-bytes");
         Environment.SetEnvironmentVariable("Auth__AccessTokenLifetimeMinutes", "15");
         Environment.SetEnvironmentVariable("Auth__RefreshTokenLifetimeDays", "7");
     }
@@ -43,6 +44,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
                 ["Database:ConnectionString"] = $"Data Source={_dbPath}",
                 ["Database:AutoMigrate"] = "true",
                 ["Auth:SigningKey"] = "integration-test-signing-key-that-is-longer-than-32-bytes",
+                ["SecretProtection:MasterKey"] = "integration-test-secret-protection-key-that-is-longer-than-32-bytes",
                 ["Auth:AccessTokenLifetimeMinutes"] = "15",
                 ["Auth:RefreshTokenLifetimeDays"] = "7",
                 ["SearchBackend:Vector"] = "qdrant",
@@ -70,6 +72,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         Environment.SetEnvironmentVariable("Storage__RootPath", null);
         Environment.SetEnvironmentVariable("OpenTelemetry__Enabled", null);
         Environment.SetEnvironmentVariable("Auth__SigningKey", null);
+        Environment.SetEnvironmentVariable("SecretProtection__MasterKey", null);
         Environment.SetEnvironmentVariable("Auth__AccessTokenLifetimeMinutes", null);
         Environment.SetEnvironmentVariable("Auth__RefreshTokenLifetimeDays", null);
 
