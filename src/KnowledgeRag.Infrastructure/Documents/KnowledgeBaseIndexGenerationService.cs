@@ -159,7 +159,7 @@ public sealed class KnowledgeBaseIndexGenerationService(
             DeploymentDisplayName = target.DeploymentDisplayName,
             ProviderConnectionId = target.Endpoint.ConnectionId,
             ProviderType = target.Endpoint.ProviderType,
-            BaseUrl = target.Endpoint.BaseUrl.TrimEnd('/'),
+            BaseUrl = target.Endpoint.BaseUrl,
             ModelName = target.Endpoint.Model,
             Dimensions = target.Dimensions,
             ConnectionRevision = target.Endpoint.Revision,
@@ -187,17 +187,16 @@ public sealed class KnowledgeBaseIndexGenerationService(
 
     public async Task TryActivateAsync(Guid generationId, CancellationToken cancellationToken = default)
     {
-        Guid knowledgeBaseId;
-        Guid previousGenerationId = Guid.Empty;
-        string? manifestFailure = null;
-        var activated = false;
-
         var identity = await db.KnowledgeBaseIndexGenerations.AsNoTracking()
             .Where(x => x.Id == generationId)
             .Select(x => new { x.KnowledgeBaseId })
             .SingleOrDefaultAsync(cancellationToken);
         if (identity is null) return;
-        knowledgeBaseId = identity.KnowledgeBaseId;
+
+        var knowledgeBaseId = identity.KnowledgeBaseId;
+        var previousGenerationId = Guid.Empty;
+        string? failureReason = null;
+        var activated = false;
 
         await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))
         {
@@ -214,82 +213,85 @@ public sealed class KnowledgeBaseIndexGenerationService(
                 .SingleOrDefaultAsync(x => x.Id == knowledgeBaseId, cancellationToken);
             if (knowledgeBase is null)
             {
-                await transaction.RollbackAsync(cancellationToken);
-                await FailAsync(generationId, null, "知识库在索引重建期间已被删除。", cancellationToken);
-                return;
-            }
-
-            knowledgeBase.UpdatedAt = DateTimeOffset.UtcNow;
-            await db.SaveChangesAsync(cancellationToken);
-
-            var generationDocuments = await db.KnowledgeBaseIndexGenerationDocuments.AsNoTracking()
-                .Where(x => x.IndexGenerationId == generationId)
-                .OrderBy(x => x.DocumentId)
-                .ToListAsync(cancellationToken);
-            if (generationDocuments.Count != generation.ExpectedDocumentCount ||
-                generationDocuments.Any(x => x.Status != KnowledgeBaseIndexGenerationDocumentStatuses.Ready))
-            {
-                await transaction.RollbackAsync(cancellationToken);
-                return;
-            }
-
-            var currentDocuments = await db.Documents.AsNoTracking()
-                .Where(x => x.KnowledgeBaseId == knowledgeBaseId && x.ChunkCount > 0)
-                .OrderBy(x => x.Id)
-                .Select(x => new { x.Id, x.Sha256 })
-                .ToListAsync(cancellationToken);
-            var currentManifest = ComputeManifestHash(currentDocuments.Select(x => (x.Id, x.Sha256)));
-            if (currentDocuments.Count != generation.ExpectedDocumentCount ||
-                !currentManifest.Equals(generation.ManifestHash, StringComparison.Ordinal))
-            {
-                manifestFailure = "重建期间知识库文档集合或内容发生变化；旧索引保持活动状态，请重新发起重建。";
+                failureReason = "知识库在索引重建期间已被删除。";
                 await transaction.RollbackAsync(cancellationToken);
             }
             else
             {
-                previousGenerationId = knowledgeBase.ActiveIndexGenerationId;
-                var now = DateTimeOffset.UtcNow;
-                knowledgeBase.ActiveIndexGenerationId = generationId;
-                knowledgeBase.UpdatedAt = now;
-                generation.Status = KnowledgeBaseIndexGenerationStatuses.Active;
-                generation.ActivatedAt = now;
-                generation.CompletedAt = now;
-
-                if (previousGenerationId != Guid.Empty)
-                {
-                    var previous = await db.KnowledgeBaseIndexGenerations
-                        .SingleOrDefaultAsync(x => x.Id == previousGenerationId, cancellationToken);
-                    if (previous is not null)
-                    {
-                        previous.Status = KnowledgeBaseIndexGenerationStatuses.Superseded;
-                        previous.CompletedAt = now;
-                        previous.ProviderConnectionId = null;
-                    }
-                }
-
-                var chunkCounts = generationDocuments.ToDictionary(x => x.DocumentId, x => x.ChunkCount);
-                var documentIds = chunkCounts.Keys.ToArray();
-                var indexedDocuments = await db.Documents
-                    .Where(x => documentIds.Contains(x.Id))
-                    .ToListAsync(cancellationToken);
-                foreach (var document in indexedDocuments)
-                {
-                    document.ChunkCount = chunkCounts[document.Id];
-                    document.Status = DocumentStatus.Ready;
-                    document.LastError = null;
-                    document.UpdatedAt = now;
-                }
-
+                // Lock the KB row before checking the manifest. Upload/index/delete paths also touch this row.
+                knowledgeBase.UpdatedAt = DateTimeOffset.UtcNow;
                 await db.SaveChangesAsync(cancellationToken);
-                await transaction.CommitAsync(cancellationToken);
-                activated = true;
+
+                var generationDocuments = await db.KnowledgeBaseIndexGenerationDocuments.AsNoTracking()
+                    .Where(x => x.IndexGenerationId == generationId)
+                    .OrderBy(x => x.DocumentId)
+                    .ToListAsync(cancellationToken);
+                if (generationDocuments.Count != generation.ExpectedDocumentCount ||
+                    generationDocuments.Any(x => x.Status != KnowledgeBaseIndexGenerationDocumentStatuses.Ready))
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return;
+                }
+
+                var currentDocuments = await db.Documents.AsNoTracking()
+                    .Where(x => x.KnowledgeBaseId == knowledgeBaseId && x.ChunkCount > 0)
+                    .OrderBy(x => x.Id)
+                    .Select(x => new { x.Id, x.Sha256 })
+                    .ToListAsync(cancellationToken);
+                var currentManifest = ComputeManifestHash(currentDocuments.Select(x => (x.Id, x.Sha256)));
+                if (currentDocuments.Count != generation.ExpectedDocumentCount ||
+                    !currentManifest.Equals(generation.ManifestHash, StringComparison.Ordinal))
+                {
+                    failureReason = "重建期间知识库文档集合或内容发生变化；旧索引保持活动状态，请重新发起重建。";
+                    await transaction.RollbackAsync(cancellationToken);
+                }
+                else
+                {
+                    previousGenerationId = knowledgeBase.ActiveIndexGenerationId;
+                    var now = DateTimeOffset.UtcNow;
+                    knowledgeBase.ActiveIndexGenerationId = generationId;
+                    knowledgeBase.UpdatedAt = now;
+                    generation.Status = KnowledgeBaseIndexGenerationStatuses.Active;
+                    generation.ActivatedAt = now;
+                    generation.CompletedAt = now;
+
+                    if (previousGenerationId != Guid.Empty)
+                    {
+                        var previous = await db.KnowledgeBaseIndexGenerations
+                            .SingleOrDefaultAsync(x => x.Id == previousGenerationId, cancellationToken);
+                        if (previous is not null)
+                        {
+                            previous.Status = KnowledgeBaseIndexGenerationStatuses.Superseded;
+                            previous.CompletedAt = now;
+                            // Superseded generations retain model metadata but no longer pin a credential connection.
+                            previous.ProviderConnectionId = null;
+                        }
+                    }
+
+                    var chunkCounts = generationDocuments.ToDictionary(x => x.DocumentId, x => x.ChunkCount);
+                    var documentIds = chunkCounts.Keys.ToArray();
+                    var indexedDocuments = await db.Documents
+                        .Where(x => documentIds.Contains(x.Id))
+                        .ToListAsync(cancellationToken);
+                    foreach (var document in indexedDocuments)
+                    {
+                        document.ChunkCount = chunkCounts[document.Id];
+                        document.Status = DocumentStatus.Ready;
+                        document.LastError = null;
+                        document.UpdatedAt = now;
+                    }
+
+                    await db.SaveChangesAsync(cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+                    activated = true;
+                }
             }
         }
 
-        if (manifestFailure is not null)
+        if (failureReason is not null)
         {
             db.ChangeTracker.Clear();
-            await FailAsync(generationId, null, manifestFailure, cancellationToken);
+            await FailAsync(generationId, null, failureReason, cancellationToken);
             return;
         }
 
@@ -383,7 +385,7 @@ public sealed class KnowledgeBaseIndexGenerationService(
 
     private static string ComputeManifestHash(IEnumerable<(Guid Id, string Sha256)> documents)
     {
-        var manifest = string.Join("\n", documents.OrderBy(x => x.Id).Select(x => $"${x.Id:N}:${x.Sha256}"));
+        var manifest = string.Join("\n", documents.OrderBy(x => x.Id).Select(x => $"{x.Id:N}:{x.Sha256}"));
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifest)));
     }
 }

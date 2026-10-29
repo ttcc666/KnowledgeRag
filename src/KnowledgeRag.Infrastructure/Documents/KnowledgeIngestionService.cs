@@ -301,7 +301,7 @@ public sealed class KnowledgeIngestionService(
         {
             activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Error, ex.Message);
             db.ChangeTracker.Clear();
-            if (await IsGenerationActiveAsync(request.DocumentId, indexGenerationId, stagedPointIds, CancellationToken.None))
+            if (await IsGenerationActiveAsync(request.KnowledgeBaseId, request.DocumentId, indexGenerationId, stagedPointIds, CancellationToken.None))
             {
                 var activated = await db.Documents.SingleAsync(x => x.Id == request.DocumentId, CancellationToken.None);
                 activity?.SetTag("rag.index.commit_recovered", true);
@@ -355,16 +355,13 @@ public sealed class KnowledgeIngestionService(
         }
 
         var claimedAt = DateTimeOffset.UtcNow;
-        var staleBefore = claimedAt.AddMinutes(-15);
-        var claimed = await db.KnowledgeBaseIndexGenerationDocuments
+        await db.KnowledgeBaseIndexGenerationDocuments
             .Where(x => x.IndexGenerationId == indexGenerationId && x.DocumentId == request.DocumentId &&
-                        (x.Status == KnowledgeBaseIndexGenerationDocumentStatuses.Pending ||
-                         (x.Status == KnowledgeBaseIndexGenerationDocumentStatuses.Processing && x.UpdatedAt < staleBefore)))
+                        x.Status != KnowledgeBaseIndexGenerationDocumentStatuses.Ready)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(x => x.Status, KnowledgeBaseIndexGenerationDocumentStatuses.Processing)
                 .SetProperty(x => x.UpdatedAt, claimedAt)
                 .SetProperty(x => x.Error, (string?)null), cancellationToken);
-        if (claimed == 0) return;
 
         db.ChangeTracker.Clear();
         var document = await db.Documents.AsNoTracking()
@@ -394,7 +391,8 @@ public sealed class KnowledgeIngestionService(
             {
                 if (!await IsGenerationBuildingAsync(indexGenerationId, cancellationToken))
                 {
-                    await CleanupVectorsAsync(stagedPointIds, document.Id, indexGenerationId);
+                    if (!await IsGenerationActiveAndDocumentReadyAsync(indexGenerationId, document.Id, cancellationToken))
+                        await CleanupVectorsAsync(stagedPointIds, document.Id, indexGenerationId);
                     return;
                 }
 
@@ -478,12 +476,18 @@ public sealed class KnowledgeIngestionService(
         catch (Exception ex)
         {
             activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Error, ex.Message);
-            var isAlreadyActiveAndReady = await db.KnowledgeBaseIndexGenerations.AsNoTracking()
-                .AnyAsync(x => x.Id == indexGenerationId && x.Status == KnowledgeBaseIndexGenerationStatuses.Active, CancellationToken.None) &&
-                await db.KnowledgeBaseIndexGenerationDocuments.AsNoTracking()
-                    .AnyAsync(x => x.IndexGenerationId == indexGenerationId && x.DocumentId == request.DocumentId &&
-                                   x.Status == KnowledgeBaseIndexGenerationDocumentStatuses.Ready, CancellationToken.None);
-            if (isAlreadyActiveAndReady) return;
+            var generationStatus = await db.KnowledgeBaseIndexGenerations.AsNoTracking()
+                .Where(x => x.Id == indexGenerationId).Select(x => x.Status).SingleOrDefaultAsync(CancellationToken.None);
+            var documentStatus = await db.KnowledgeBaseIndexGenerationDocuments.AsNoTracking()
+                .Where(x => x.IndexGenerationId == indexGenerationId && x.DocumentId == request.DocumentId)
+                .Select(x => x.Status).SingleOrDefaultAsync(CancellationToken.None);
+            if (documentStatus == KnowledgeBaseIndexGenerationDocumentStatuses.Ready)
+            {
+                if (generationStatus == KnowledgeBaseIndexGenerationStatuses.Building)
+                    await indexGenerationService.TryActivateAsync(indexGenerationId, CancellationToken.None);
+                return;
+            }
+            if (generationStatus == KnowledgeBaseIndexGenerationStatuses.Active) return;
 
             await indexGenerationService.FailAsync(indexGenerationId, request.DocumentId, ex.Message, CancellationToken.None);
             await CleanupVectorsAsync(stagedPointIds, request.DocumentId, indexGenerationId);
@@ -499,22 +503,34 @@ public sealed class KnowledgeIngestionService(
         => db.KnowledgeBaseIndexGenerations.AsNoTracking()
             .AnyAsync(x => x.Id == generationId && x.Status == KnowledgeBaseIndexGenerationStatuses.Building, cancellationToken);
 
+    private async Task<bool> IsGenerationActiveAndDocumentReadyAsync(Guid generationId, Guid documentId, CancellationToken cancellationToken)
+    {
+        var status = await db.KnowledgeBaseIndexGenerations.AsNoTracking()
+            .Where(x => x.Id == generationId)
+            .Select(x => x.Status)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (status != KnowledgeBaseIndexGenerationStatuses.Active) return false;
+        return await db.KnowledgeBaseIndexGenerationDocuments.AsNoTracking()
+            .AnyAsync(x => x.IndexGenerationId == generationId && x.DocumentId == documentId &&
+                           x.Status == KnowledgeBaseIndexGenerationDocumentStatuses.Ready, cancellationToken);
+    }
+
     private async Task EnsureNotCancelledAsync(DocumentEntity document, CancellationToken cancellationToken)
     {
         await db.Entry(document).ReloadAsync(cancellationToken);
         if (document.Status == DocumentStatus.Cancelled) throw new DocumentProcessingCancelledException();
     }
 
-    private async Task<bool> IsGenerationActiveAsync(Guid documentId, Guid indexGenerationId, IReadOnlyCollection<Guid> stagedPointIds, CancellationToken cancellationToken)
+    private async Task<bool> IsGenerationActiveAsync(Guid knowledgeBaseId, Guid documentId, Guid indexGenerationId, IReadOnlyCollection<Guid> stagedPointIds, CancellationToken cancellationToken)
     {
         if (stagedPointIds.Count == 0) return false;
         var activeGenerationId = await db.KnowledgeBases.AsNoTracking()
-            .Where(x => db.Documents.Any(d => d.Id == documentId && d.KnowledgeBaseId == x.Id))
+            .Where(x => x.Id == knowledgeBaseId)
             .Select(x => (Guid?)x.ActiveIndexGenerationId)
             .SingleOrDefaultAsync(cancellationToken);
         if (activeGenerationId != indexGenerationId) return false;
         var activeIds = await db.DocumentChunks.AsNoTracking()
-            .Where(x => x.DocumentId == documentId && x.IndexGenerationId == indexGenerationId)
+            .Where(x => x.KnowledgeBaseId == knowledgeBaseId && x.DocumentId == documentId && x.IndexGenerationId == indexGenerationId)
             .Select(x => x.Id)
             .ToListAsync(cancellationToken);
         return activeIds.Count == stagedPointIds.Count && activeIds.All(stagedPointIds.Contains);
