@@ -49,7 +49,7 @@ Api ───────► Infrastructure ───────► Application
  └──────────────────────────────────────► Domain
 ```
 
-`Program.cs` 只负责组合启动；API 路由按业务拆在 `KnowledgeRag.Api/Endpoints`，EF Core migrations 固定在 `KnowledgeRag.Infrastructure/Persistence/Migrations`。详细开发约定见 [`ARCHITECTURE.md`](ARCHITECTURE.md)。
+`Program.cs` 只负责组合启动；API 路由按业务拆在 `src/KnowledgeRag.Api/Endpoints`，EF Core migrations 固定在 `KnowledgeRag.Infrastructure/Persistence/Migrations`。详细开发约定见 [`ARCHITECTURE.md`](ARCHITECTURE.md)。
 
 ```text
 React / Vite / shadcn-admin
@@ -177,7 +177,7 @@ npm run build
 npm run build:api
 ```
 
-Docker 不需要手工执行这些命令：`KnowledgeRag.Api/Dockerfile` 已增加 Node 22 前端构建阶段，最终 React 静态资源会自动进入 .NET 10 镜像。
+Docker 不需要手工执行这些命令：`src/KnowledgeRag.Api/Dockerfile` 已增加 Node 22 前端构建阶段，最终 React 静态资源会自动进入 .NET 10 镜像。
 
 管理后台当前包含：
 
