@@ -81,7 +81,8 @@ React + assistant-ui
                                       persist final validated answer + cited Sources + usage
 
 SSE progress events update the Timeline during execution; final answer delta is
-emitted only after workflow review and the deterministic Citation Gate.
+emitted only after the configured workflow (Reviewer / Repair when enabled) and the
+deterministic Citation Gate.
 ~~~
 
 Search and Governance use their own authenticated Endpoints and services; they do not
