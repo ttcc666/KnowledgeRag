@@ -16,6 +16,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: feat/tenant-ai-embedding-index-generations
+      - name: Scope changelog edits to first current section
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/pr32-hardening.py')
+          s = p.read_text()
+          s = s.replace('changelog = replace_once(changelog, "### Added\\n\\n", "### Added\\n\\n" + added, "changelog Added")', 'changelog = changelog.replace("### Added\\n\\n", "### Added\\n\\n" + added, 1)')
+          s = s.replace('changelog = replace_once(changelog, "### Changed\\n\\n", "### Changed\\n\\n" + changed, "changelog Changed")', 'changelog = changelog.replace("### Changed\\n\\n", "### Changed\\n\\n" + changed, 1)')
+          s = s.replace('changelog = replace_once(changelog, "### Fixed\\n\\n", "### Fixed\\n\\n" + fixed, "changelog Fixed")', 'changelog = changelog.replace("### Fixed\\n\\n", "### Fixed\\n\\n" + fixed, 1)')
+          p.write_text(s)
+          PY
       - name: Apply hardening patch
         run: python3 scripts/pr32-hardening.py
       - name: Verify patch
