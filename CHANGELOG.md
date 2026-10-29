@@ -89,6 +89,8 @@
 
 ### Fixed
 
+- 修复知识库成员被移除后，用户仍可通过未指定 Knowledge Base 的会话列表读取旧会话标题和元数据；SQLite raw SQL 与 EF Core 列表查询现在重新校验当前成员关系，并增加撤权后列表与消息访问的集成回归测试。
+
 - 修复 KB Embedding Index 状态查询在 SQLite 上直接对 `DateTimeOffset` 排序导致 500；SQLite 改用 `julianday(CreatedAt)` 在数据库内取最新 generation，PostgreSQL 保持原生排序。
 - 修复 Tenant AI Provider migration 固定使用 SQLite 的 `TEXT` / `INTEGER` 列类型，导致 PostgreSQL 创建 Tenant 外键时发生 `42804`；Guid / 外键列现在根据 ActiveProvider 明确使用 PostgreSQL `uuid` 或 SQLite `TEXT`，其他列继续采用各 Provider 的原生类型映射。
 - 修复 Tenant AI Provider、Model Deployment 与 Tenant Defaults 表单的 Label 未关联输入控件 / SelectTrigger，导致浏览器无法按标签定位且控件缺少明确可访问名称；新增稳定控件 ID、Label 关联和 Select 的 `aria-labelledby`，并扩展 Playwright 回归覆盖。
