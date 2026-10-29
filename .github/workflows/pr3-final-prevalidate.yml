@@ -1,0 +1,45 @@
+name: pr3-final-prevalidate
+
+on:
+  push:
+    branches:
+      - feat/ai-provider-routing-governance
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: src/KnowledgeRag.Admin/package-lock.json
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Frontend install
+        working-directory: src/KnowledgeRag.Admin
+        run: npm ci
+      - name: Frontend build
+        working-directory: src/KnowledgeRag.Admin
+        run: npm run build
+      - name: Frontend unit tests
+        working-directory: src/KnowledgeRag.Admin
+        run: npm test
+      - name: Install Playwright Chromium
+        working-directory: src/KnowledgeRag.Admin
+        run: npx playwright install --with-deps chromium
+      - name: Browser smoke
+        working-directory: src/KnowledgeRag.Admin
+        run: npm run test:e2e
+      - name: Backend restore
+        run: dotnet restore KnowledgeRag.NonAzure.sln
+      - name: Backend build
+        run: dotnet build KnowledgeRag.NonAzure.sln -c Release --no-restore
+      - name: Backend tests
+        run: dotnet test KnowledgeRag.NonAzure.sln -c Release --no-build
