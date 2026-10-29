@@ -12,6 +12,13 @@ public static class AiModelTypes
     public const string Rerank = "rerank";
 }
 
+public static class AiDeploymentHealthStatuses
+{
+    public const string Unknown = "unknown";
+    public const string Healthy = "healthy";
+    public const string Unhealthy = "unhealthy";
+}
+
 public sealed class AiProviderConnectionEntity
 {
     public Guid Id { get; set; }
@@ -37,6 +44,10 @@ public sealed class AiModelDeploymentEntity
     public string RemoteModelName { get; set; } = string.Empty;
     public string ModelType { get; set; } = AiModelTypes.Chat;
     public int? EmbeddingDimensions { get; set; }
+    public Guid? FallbackDeploymentId { get; set; }
+    public string HealthStatus { get; set; } = AiDeploymentHealthStatuses.Unknown;
+    public DateTimeOffset? LastHealthCheckedAt { get; set; }
+    public string? LastHealthError { get; set; }
     public bool IsEnabled { get; set; } = true;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
