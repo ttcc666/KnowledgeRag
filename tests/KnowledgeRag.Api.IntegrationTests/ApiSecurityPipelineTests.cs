@@ -3,12 +3,36 @@ using System.Net.Http.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
 using Xunit;
 
 namespace KnowledgeRag.Api.IntegrationTests;
 
 public sealed class ApiSecurityPipelineTests
 {
+    [Theory]
+    [InlineData("Development", false, true)]
+    [InlineData("Testing", false, false)]
+    [InlineData("Staging", false, false)]
+    [InlineData("Production", false, false)]
+    [InlineData("Production", true, true)]
+    public void SwaggerExposure_RequiresDevelopmentOrExplicitEnablement(
+        string environmentName,
+        bool explicitlyEnabled,
+        bool expected)
+    {
+        var environment = new TestHostEnvironment { EnvironmentName = environmentName };
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Swagger:Enabled"] = explicitlyEnabled.ToString()
+            })
+            .Build();
+
+        Assert.Equal(expected, WebApplicationExtensions.ShouldExposeSwagger(environment, configuration));
+    }
+
     [Fact]
     public async Task ConfiguredCorsAndGlobalRateLimiter_AreAppliedToApiRequests()
     {
@@ -61,6 +85,14 @@ public sealed class ApiSecurityPipelineTests
         });
         Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
         Assert.Equal("60", Assert.Single(limited.Headers.GetValues("Retry-After")));
+    }
+
+    private sealed class TestHostEnvironment : IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = Environments.Production;
+        public string ApplicationName { get; set; } = nameof(Program);
+        public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
+        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
 
     private sealed class RateLimitApiFactory : WebApplicationFactory<Program>

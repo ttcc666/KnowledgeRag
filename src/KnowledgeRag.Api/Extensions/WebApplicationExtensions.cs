@@ -1,4 +1,5 @@
 using KnowledgeRag.Api.Middleware;
+using Microsoft.Extensions.Hosting;
 
 namespace KnowledgeRag.Api.Extensions;
 
@@ -13,8 +14,11 @@ public static class WebApplicationExtensions
             app.UseHttpsRedirection();
 
         app.UseMiddleware<ApiExceptionMiddleware>();
-        app.UseSwagger();
-        app.UseSwaggerUI();
+        if (ShouldExposeSwagger(app.Environment, app.Configuration))
+        {
+            app.UseSwagger();
+            app.UseSwaggerUI();
+        }
         app.UseDefaultFiles();
         app.UseStaticFiles();
         app.UseCors("ConfiguredOrigins");
@@ -26,4 +30,7 @@ public static class WebApplicationExtensions
         app.UseAuthorization();
         return app;
     }
+
+    public static bool ShouldExposeSwagger(IHostEnvironment environment, IConfiguration configuration)
+        => environment.IsDevelopment() || configuration.GetValue<bool>("Swagger:Enabled");
 }
