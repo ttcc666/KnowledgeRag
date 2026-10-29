@@ -39,7 +39,7 @@ npm ci
 npm run dev
 ```
 
-Vite 默认将 `/api` 请求代理到 `http://localhost:8080`。如果后端端口或代理地址有变化，请同步核对 `vite.config.ts`。
+Vite 默认将 `/api` 请求和 `/hubs` SignalR WebSocket 代理到 `http://localhost:8080`。如后端地址有变化，可设置 `VITE_DEV_API_PROXY`，并核对 `vite.config.ts`。
 
 打开 `http://localhost:5173`。Swagger 位于后端的 `/swagger`。
 
