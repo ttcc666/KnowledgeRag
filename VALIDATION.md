@@ -1,140 +1,182 @@
-# Validation
+# KnowledgeRag 验证指南
 
-## 当前 Unreleased — RAG Production Readiness v3
+本文记录当前仓库可执行的验证命令、GitHub Actions 的真实覆盖范围，以及本地如何启动 native backend 测试环境。CI 结果必须对应待合并分支的最新 HEAD；旧 commit 的绿色结果不能替代新 commit 的验证。
 
-本轮新增 / 调整的验证重点：
+## 1. 本地环境要求
 
-- Final Answer Citation Gate：有效 `[E#]` 归一化、非法 Evidence ID fail-closed、知识型无引用回答 fail-closed、no-answer abstention、非知识回答。
-- Reviewer 之后、SSE / DB 之前执行统一 Citation validation，客户端不再接收未经最终 Citation Gate 的模型文本。
-- RAG Profile 在同一 scoped request 内解析为单一 execution snapshot，Reservation / Agent / Evaluation 使用同一模型与策略快照。
-- Multi-query 原始查询保持 mandatory，Planner 扩展查询改为 best-effort；扩展查询失败不会拖垮仍有原始检索结果的整轮。
-- Evidence context 增加总 token budget 与单文档 token budget，按最终排序确定性截断。
-- Reviewer repair 的跨轮 Evidence merge 不直接比较 round-local reranker score，改用合并后的 fusion 归一化排序。
-- Evaluation v3 增加 expected source labels、Hit Rate、Recall@K、MRR、nDCG，并与 citation / grounding / no-answer 分层统计。
-- 消息历史增加 bounded server pagination；SQLite 使用 `julianday(CreatedAt)` 在数据库内完成时间比较 / 排序，PostgreSQL 使用正常 server-side `ORDER BY / LIMIT`。
-- assistant-ui External Store Runtime 增加 `hasEarlier / onLoadEarlier`、Feedback Adapter、Thread List Adapter、rename / archive / restore / delete。
-- Chat 继续保持 Thread、Conversations、Source Panel 独立滚动，未恢复 browser global scrolling。
-- Chat 的受限富文本渲染只处理文本结构 / code fence / trusted `[n]` citation，不解析 raw HTML，不展示 Chain of Thought。
-- Playwright product flow 更新为分页消息 API，并覆盖 inline citation、Source Panel、feedback、rename、archive / restore。
+- .NET 10 SDK（以根目录 `global.json` 为准）。
+- Node.js 22 与 npm。
+- Docker Engine / Docker Compose（用于 PostgreSQL、RabbitMQ、Qdrant、MinIO 或 OpenTelemetry Collector）。
+- 可访问的 NuGet / npm package registry；需要真实模型调用的手工 smoke test 还需有效的 OpenAI-compatible Provider 配置。
 
-新增 C# deterministic regression tests：
+## 2. 前端 Build / Unit / Accessibility / E2E
 
-```text
-FinalAnswerPolicyTests
-EvaluationRetrievalScoringTests
-RagWorkflowPolicyTests (cross-round merge regression)
-```
-
-本轮没有新增 EF Core schema / migration。Conversation archive 使用过滤掉的内部 `__meta` ChatMessage 事件持久化；Feedback 复用现有 Audit Log；Evaluation v3 advanced expectation 使用向后兼容的 versioned envelope 存入现有字段。
-
-## 当前环境限制
-
-当前执行容器无法解析 GitHub / NuGet / NPM 外网 DNS，且没有可用于本仓库的本地 clone，因此本轮不能诚实宣称在容器内执行过完整 CLI build/test。代码通过 GitHub Repository Connector 写入独立分支，最终验证以该分支 **最新 HEAD 对应的真实 GitHub Actions** 为准。
-
-必须由 CI 覆盖：
+从仓库根目录执行：
 
 ```bash
-npm run build
-npm run test
-npm run test:e2e
-dotnet restore KnowledgeRag.NonAzure.sln
-dotnet build KnowledgeRag.NonAzure.sln -c Release --no-restore
-dotnet test KnowledgeRag.NonAzure.sln -c Release --no-build
-```
-
-Ready / main 还必须覆盖 SQLite、PostgreSQL、RabbitMQ、CAP、pgvector、PostgreSQL FTS 与 production frontend build。新 commit 触发 concurrency cancel 时，只认最新 HEAD 的 `build-test` / `native-backends-smoke` 和完整 Ready CI。
-
----
-
-## 项目历史验证基线
-
-- EF Core Migration + design-time DbContext factory
-- Refresh Token rotation/replay detection
-- Tenant / TenantMember
-- Tenant API Key + scopes + optional KnowledgeBase binding
-- Qdrant / pgvector vector backend abstraction
-- C# BM25 / PostgreSQL FTS lexical backend abstraction
-- Local / S3/MinIO storage abstraction
-- OpenTelemetry tracing + metrics + OTLP
-- ASP.NET Core WebApplicationFactory integration tests
-- External backend integration tests（pgvector / PostgreSQL FTS / MinIO）
-- GitHub Actions CI（restore/build/test + production-backend smoke）
-- 全项目升级到 .NET 10 (`net10.0`)；Docker / CI / EF Core 10 / ASP.NET Core 10 同步升级
-- 前端改造为 React 19 + Vite 8 + Tailwind CSS 4 + Shadcn/Radix + TanStack Query/Router 管理后台
-
-## 已执行的静态检查
-
-- JSON 配置解析
-- React/TypeScript 源码语法扫描（全量 `.ts/.tsx` 无 TypeScript parser syntax diagnostics）
-- 前端 `package.json` / `tsconfig.json` / `components.json` JSON 解析
-- C# 文件括号结构检查
-- Solution 文件结构检查
-- 旧 `EnsureCreated` / 旧服务签名引用搜索
-- Azure SDK / Azure Identity 残留搜索
-- 新后端配置与 Docker Compose 配置人工核对
-- CI YAML / OpenTelemetry Collector YAML 解析
-- ExternalBackend 测试源码结构检查
-
-## 推荐本地验证
-
-在具备 .NET 10 SDK、Node 22、Docker 与网络依赖的环境执行：
-
-```bash
-dotnet restore KnowledgeRag.NonAzure.sln
-dotnet build KnowledgeRag.NonAzure.sln -c Release --no-restore
-dotnet test KnowledgeRag.NonAzure.sln -c Release --no-build
 cd src/KnowledgeRag.Admin
 npm ci
 npm run build
-npm run test
+npm test
 npm run test:e2e
 ```
 
-随后分别验证两套推荐组合：
+对应内容：
+
+- `npm run build`：TypeScript project build + Vite production build。
+- `npm test`：Vitest 单元 / 组件与 accessibility 回归。
+- `npm run test:e2e`：Playwright 浏览器流程。
+
+Chat / assistant-ui 相关回归应覆盖 message-scoped Citation、Evidence Panel、SSE Workflow Timeline、history pagination、feedback、rename、archive / restore，以及桌面 / 移动端布局。
+
+## 3. .NET Restore / Build / Integration Tests
+
+从仓库根目录执行：
 
 ```bash
-# default
-docker compose up -d --build
-
-# native PostgreSQL search
-docker compose --profile postgres up -d --build
-
-# MinIO
-docker compose --profile s3 up -d --build
+dotnet restore KnowledgeRag.NonAzure.sln
+dotnet build KnowledgeRag.NonAzure.sln -c Release --no-restore
+dotnet test KnowledgeRag.NonAzure.sln -c Release --no-build
 ```
 
-从上一版 `EnsureCreated` 数据库升级时请先阅读 `MIGRATION_GUIDE.md`。
-
-## shadcn-admin 前端改造验证
-
-`src/KnowledgeRag.Admin` 已完成：
-
-- `package.json` / `tsconfig.json` / `components.json` JSON 解析基线。
-- Docker Compose / GitHub Actions / OTel Collector YAML 解析基线。
-- Dockerfile 包含 Node 22 frontend stage、`npm run build`、`dist -> wwwroot` 复制。
-- CI 包含 Node 22 setup 与 frontend build step。
-- Chat 使用 assistant-ui External Store Runtime，同时由应用自己的 API / TanStack Query 保存会话与消息。
-
-## 后端目录 / 架构重构验证
-
-后端结构保持：
+当前测试项目为：
 
 ```text
-KnowledgeRag.Domain
-KnowledgeRag.Application
-KnowledgeRag.Infrastructure
-KnowledgeRag.Api
+tests/KnowledgeRag.Api.IntegrationTests
 ```
 
-架构约束：
+通过 `WebApplicationFactory<Program>` 覆盖实际 ASP.NET Core pipeline。当前回归覆盖包括：
 
-- Solution 包含 Domain / Application / Infrastructure / Api / IntegrationTests。
-- 所有 C# 项目继续使用 `net10.0`。
-- Domain 无本解决方案内部项目依赖。
-- Application 只引用 Domain。
-- Infrastructure 只引用 Application + Domain。
-- Api 保持 composition / endpoint 边界，不把检索、Agent、Persistence 逻辑重新堆回 Endpoint。
-- EF Core migrations 位于 `KnowledgeRag.Infrastructure/Persistence/Migrations`。
-- 搜索、Conversation、Governance 等模块继续通过 Infrastructure DI 注册。
+- 注册 / 登录、Refresh Token rotation 与 replay detection、Tenant / API Key / KB 权限。
+- SQLite BM25 查询兼容性。
+- RAG Workflow policy、Citation Contract / Final Answer Gate、no-answer 与 citation fail-closed。
+- Evaluation scoring / expected sources。
+- Tenant AI Provider Connection / Deployment / defaults / routing。
+- Governance API、usage accounting、Webhook URL policy、channel adapters、delivery timeout。
+- Embedding index generation、vector point ID 与跨 generation 的隔离语义。
 
-开发约定详见根目录 `ARCHITECTURE.md` 与 `DEVELOPMENT_WORKFLOW.md`。
+## 4. 当前 GitHub Actions CI
+
+工作流：`.github/workflows/ci.yml`。
+
+### `build-test`
+
+当前执行：
+
+1. 前端 `npm ci`。
+2. `npm run build`。
+3. `npm test`。
+4. 安装 Playwright Chromium。
+5. `npm run test:e2e`。
+6. `dotnet restore KnowledgeRag.NonAzure.sln`。
+7. Release build。
+8. `dotnet test KnowledgeRag.NonAzure.sln -c Release --no-build`，并上传 TRX 测试结果。
+
+具体步骤由变更分类控制：main push、手动 / nightly workflow 和 Ready for Review PR 执行完整验证；Draft PR 可根据改动范围跳过不相关的重型步骤。
+
+### `native-backends-smoke`
+
+当前 native job 实际执行：
+
+1. 启动 PostgreSQL（pgvector 镜像）、RabbitMQ 与 OpenTelemetry Collector。
+2. 使用 PostgreSQL、pgvector、PostgreSQL FTS、CAP/RabbitMQ 配置构建并启动应用。
+3. 检查 `/api/health/ready` 和 `/api/health`。
+4. 验证 PostgreSQL 中 CAP schema 存在。
+5. 运行 `Category=ExternalBackend` 集成测试，通过项目代码验证 pgvector 与 PostgreSQL FTS。
+6. 失败时收集容器日志，最后关闭测试服务。
+
+当前 CI 的 native job 使用 Local storage，**不会启动 MinIO**。MinIO / S3 的 round-trip 测试由 `RUN_EXTERNAL_S3_TESTS=1` 控制，需要单独准备 MinIO 端点和凭据。
+
+## 5. 本地 native backend smoke
+
+先准备环境变量并启动依赖：
+
+```bash
+docker compose --profile postgres --profile cap --profile otel up -d postgres rabbitmq otel-collector
+```
+
+确认 PostgreSQL 和 RabbitMQ ready 后，再使用当前 Compose 配置启动应用：
+
+```bash
+DATABASE_PROVIDER=PostgreSql \
+SEARCH_VECTOR_BACKEND=pgvector \
+SEARCH_LEXICAL_BACKEND=postgres_fts \
+CAP_TRANSPORT=rabbitmq \
+docker compose --profile postgres --profile cap --profile otel up -d --build app
+```
+
+然后运行外部后端测试。测试进程需要能从宿主机访问 PostgreSQL，并设置测试专用连接串；以下以 Compose 默认数据库名 / 用户为例，请按自己的密码调整：
+
+```bash
+RUN_EXTERNAL_BACKEND_TESTS=1 \
+EXTERNAL_DATABASE_CONNECTION_STRING='Host=localhost;Port=5432;Database=knowledge_rag;Username=knowledge_rag;Password=...' \
+dotnet test tests/KnowledgeRag.Api.IntegrationTests/KnowledgeRag.Api.IntegrationTests.csproj \
+  -c Release --filter Category=ExternalBackend
+```
+
+测试环境的 `EXTERNAL_DATABASE_CONNECTION_STRING` 必须指向可访问的 PostgreSQL；应用容器内的连接串则应使用 Docker network 服务名（例如 `Host=postgres`）。不要将真实密码提交到仓库。
+
+测试结束后清理：
+
+```bash
+docker compose --profile postgres --profile cap --profile otel down -v
+```
+
+注意：`down -v` 会删除 Compose 管理的测试卷，不要对包含需保留数据的开发 / 生产环境执行。
+
+## 6. MinIO / S3 round-trip（可选）
+
+先启动 MinIO：
+
+```bash
+docker compose --profile s3 up -d minio
+```
+
+然后向测试进程提供 `S3_ENDPOINT`、`S3_ACCESS_KEY`、`S3_SECRET_KEY`、`S3_BUCKET` 等测试配置，并设置：
+
+```bash
+RUN_EXTERNAL_S3_TESTS=1
+```
+
+测试会验证 S3-compatible storage 的写入、读取和删除。仅设置 `RUN_EXTERNAL_BACKEND_TESTS=1` 不代表 MinIO 测试已经运行。
+
+## 7. 推荐验证顺序
+
+对于普通代码改动：
+
+1. 运行改动相关的 Vitest / xUnit 测试。
+2. 运行对应完整前端或后端测试。
+3. 确认 Draft PR 最新 HEAD 的 required checks 通过。
+4. 转 Ready 后等待完整 CI。
+5. 合并后确认 main push CI 最新 HEAD 的 `build-test` 和 `native-backends-smoke` 均成功。
+
+对于文档-only 改动，至少检查 Markdown 链接、命令、路由、配置键与源码一致；Draft 阶段可走 docs-only 快速路径，但 Ready PR 仍必须通过完整 CI。
+
+## 8. 变更类型与必需验证
+
+| 改动范围 | 最低验证要求 |
+|---|---|
+| 纯 Markdown / 文档 | 校对链接、命令、配置键与实际实现；Ready CI 全量通过 |
+| React / TypeScript / Chat UI | production build、Vitest / accessibility、Playwright |
+| .NET 业务逻辑 / API | Release build、完整 integration tests |
+| EF Core Model / migration | SQLite tests + PostgreSQL native smoke；核对 migration history 与 Model Snapshot |
+| Search / Embedding / vector IDs | BM25 / RRF / reranker 相关测试、generation 回归、native pgvector / FTS |
+| CAP / RabbitMQ / SignalR | native smoke、readiness、CAP schema 与任务状态 / 通知行为 |
+| Provider / cost / governance | Tenant AI Provider API、route / fallback、usage / pricing、Audit / Webhook 回归 |
+| Docker / CI / runtime configuration | 检查 Compose、环境变量映射与工作流；执行完整 CI |
+
+## 9. 验证时的安全边界
+
+- 不在测试输出、截图或 artifact 中保存真实 API Key、Credential、Webhook Secret。
+- 不将模型生成的 chain-of-thought 或系统 Prompt 当作测试产物。
+- 不因 CI 失败而关闭测试、吞掉异常或扩大跳过条件。
+- 如果外部服务 / 模型不可用，明确记录未执行的测试；不能将“测试跳过”描述为“真实后端验证通过”。
+- 生产 migration 应在 staging 演练；旧 `EnsureCreated` 数据库升级见 [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)。
+
+## 10. 相关文档
+
+- [开发流程与 CI 策略](DEVELOPMENT_WORKFLOW.md)
+- [系统架构](ARCHITECTURE.md)
+- [CAP / SignalR / Embedding Index](CAP_SIGNALR_INGESTION.md)
+- [AI Provider Configuration](docs/AI_PROVIDER_CONFIGURATION.md)
+- [RAG Agent Workflow](docs/RAG_AGENT_WORKFLOW.md)
