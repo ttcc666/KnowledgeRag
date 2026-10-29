@@ -12,7 +12,7 @@ namespace KnowledgeRag.Infrastructure.Persistence.Migrations
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             // Guid columns must match the provider-specific principal key type for foreign keys.
-            var guidColumnType = migrationBuilder.ActiveProvider.Contains("Npgsql", StringComparison.Ordinal)
+            var guidColumnType = ActiveProvider.Contains("Npgsql", StringComparison.Ordinal)
                 ? "uuid"
                 : "TEXT";
 
