@@ -91,11 +91,15 @@
 5. 仓库 native CI 的外部后端测试命令如下；只有在 PostgreSQL、连接字符串与测试环境变量已配置时才可运行：
 
    ~~~bash
-   dotnet test tests/KnowledgeRag.Api.IntegrationTests/KnowledgeRag.Api.IntegrationTests.csproj -c Release --filter Category=ExternalBackend
+   RUN_EXTERNAL_BACKEND_TESTS=1 \
+EXTERNAL_DATABASE_CONNECTION_STRING='Host=localhost;Port=5432;Database=knowledge_rag;Username=knowledge_rag;Password=...' \
+dotnet test tests/KnowledgeRag.Api.IntegrationTests/KnowledgeRag.Api.IntegrationTests.csproj \
+  -c Release --filter Category=ExternalBackend
    ~~~
 
 **修复与验证**
 
+- 测试进程必须设置 RUN_EXTERNAL_BACKEND_TESTS=1；否则测试会按设计直接跳过。EXTERNAL_DATABASE_CONNECTION_STRING 必须指向宿主机可访问的 PostgreSQL。
 - 确认启用的 vector / lexical backend 与真实数据库一致。
 - 确认数据库用户有必要的 extension / index 权限，且 schema 初始化已完成。
 - 使用真实 PostgreSQL 执行 ExternalBackend 测试；SQLite 测试不能替代 pgvector 与 PostgreSQL FTS smoke。
