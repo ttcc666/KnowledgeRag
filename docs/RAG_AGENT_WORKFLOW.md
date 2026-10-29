@@ -68,25 +68,22 @@ A concurrent administrator update takes effect on a later request rather than ch
 
 ## Model routing
 
-All role-specific model values are optional and fall back to `AI:ChatModel`.
+RAG role routing is deployment-first. A Knowledge Base may bind Planner, Answer, Reviewer/Specialist, and Reranker to tenant-scoped Model Deployment IDs. Each run resolves those bindings once at request start into immutable endpoint snapshots.
 
-```json
-{
-  "AI": {
-    "ChatModel": "gpt-4o-mini",
-    "PlannerModel": "",
-    "AnswerModel": "",
-    "ReviewerModel": ""
-  }
-}
-```
+A Deployment owns provider connection identity, remote model name, health state, and an optional explicit same-type fallback. If the selected Deployment is disabled or persistently unhealthy, resolution may follow only that configured fallback chain; it never silently jumps to another Provider. Fallback cycles are rejected.
+
+When a KB role has no Deployment binding, routing falls back to the tenant default Deployment and then to the platform `AI` configuration. Existing raw `PlannerModel` / `AnswerModel` / `ReviewerModel` fields remain only as backward-compatible model-name overrides when no Deployment is bound.
+
+Cost governance follows the same identity model: deployment-specific prices are preferred over legacy `(tenant, model-name)` prices, so two Providers exposing the same model string can be priced independently. Budget Reservation and usage Settle carry the resolved `DeploymentId` / `ProviderType` snapshot.
 
 Recommended production routing:
 
-- Planner: small/fast model with reliable structured output.
-- Answer: strongest model justified by quality/cost targets.
-- Reviewer: small/fast model with reliable structured output.
-- Specialist Agents: currently use the reviewer model unless configured otherwise.
+- Planner: small/fast chat Deployment with reliable structured output.
+- Answer: strongest chat Deployment justified by quality/cost targets.
+- Reviewer/Specialists: chat Deployment optimized for structured verification.
+- Reranker: explicit rerank Deployment when LLM reranking is enabled.
+
+Health checks are administrative observations, not an unconstrained runtime load balancer. A successful check stores `healthy`; a failed check stores `unhealthy`; edits that change provider/model/type/enablement reset health to `unknown`.
 
 ## Workflow controls
 

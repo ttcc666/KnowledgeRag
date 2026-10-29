@@ -64,6 +64,7 @@ test('tenant owner can configure an AI provider without exposing the credential'
   await expect(page.getByLabel('显示名称')).toBeVisible()
   await expect(page.getByLabel('远端模型名')).toBeVisible()
   await expect(page.getByRole('combobox', { name: '类型' })).toBeVisible()
+  await expect(page.getByRole('combobox', { name: 'Fallback deployment' })).toBeVisible()
   await page.getByRole('combobox', { name: '类型' }).click()
   await page.getByRole('option', { name: 'Embedding', exact: true }).click()
   await expect(page.getByLabel('Embedding dimensions')).toBeVisible()

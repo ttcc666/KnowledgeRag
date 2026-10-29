@@ -57,9 +57,10 @@ export interface ApiKeySummary { id: string; name: string; keyPrefix: string; sc
 export interface CreatedApiKey { id: string; name: string; apiKey: string; scopes: string[]; knowledgeBaseId?: string | null; expiresAt?: string | null }
 export interface AiProviderDescriptor { id: string; name: string; description: string; supportsCustomBaseUrl: boolean }
 export interface AiProviderConnection { id: string; tenantId: string; name: string; providerType: string; baseUrl: string; hasCredential: boolean; isEnabled: boolean; revision: number; updatedAt: string }
-export interface AiModelDeployment { id: string; tenantId: string; connectionId: string; connectionName: string; displayName: string; remoteModelName: string; modelType: AiModelType; embeddingDimensions?: number | null; isEnabled: boolean; updatedAt: string }
+export interface AiModelDeployment { id: string; tenantId: string; connectionId: string; connectionName: string; displayName: string; remoteModelName: string; modelType: AiModelType; embeddingDimensions?: number | null; isEnabled: boolean; updatedAt: string; fallbackDeploymentId?: string | null; healthStatus: string; lastHealthCheckedAt?: string | null; lastHealthError?: string | null }
 export interface TenantAiDefaults { tenantId: string; defaultChatDeploymentId?: string | null; defaultEmbeddingDeploymentId?: string | null; defaultRerankerDeploymentId?: string | null; updatedAt?: string | null }
 export interface AiConnectionTestResult { success: boolean; message: string }
+export interface AiDeploymentHealthResult { deploymentId: string; success: boolean; status: string; message: string; checkedAt: string }
 
 export interface DailyActivityPoint { date: string; documents: number; conversations: number }
 export interface IngestionJobSummary { documentId: string; knowledgeBaseId: string; knowledgeBaseName: string; fileName: string; status: DocumentStatus; chunkCount: number; lastError?: string | null; createdAt: string; updatedAt: string; elapsedSeconds: number; queuePosition?: number | null }
@@ -80,6 +81,10 @@ export interface RagProfile {
   plannerModel: string
   answerModel: string
   reviewerModel: string
+  plannerDeploymentId?: string | null
+  answerDeploymentId?: string | null
+  reviewerDeploymentId?: string | null
+  rerankerDeploymentId?: string | null
   promptProfileId?: string | null
   agentMode: string
   monthlyBudgetUsd: number
@@ -88,8 +93,8 @@ export interface RagProfile {
   updatedAt: string
 }
 export type RagProfileUpdate = Omit<RagProfile, 'knowledgeBaseId' | 'updatedByUserId' | 'updatedAt'>
-export interface RagRun { id: string; tenantId: string; knowledgeBaseId: string; conversationId?: string | null; userId: string; apiKeyId?: string | null; query: string; answer: string; status: string; answerModel: string; agentMode: string; sourceCount: number; estimatedInputTokens: number; estimatedOutputTokens: number; estimatedCostUsd: number; latencyMs: number; traceJson: string; createdAt: string }
-export interface ModelPrice { id: string; tenantId: string; model: string; inputCostPerMillionTokens: number; outputCostPerMillionTokens: number; isActive: boolean; updatedAt: string }
+export interface RagRun { id: string; tenantId: string; knowledgeBaseId: string; conversationId?: string | null; userId: string; apiKeyId?: string | null; query: string; answer: string; status: string; answerModel: string; answerDeploymentId?: string | null; agentMode: string; sourceCount: number; estimatedInputTokens: number; estimatedOutputTokens: number; estimatedCostUsd: number; latencyMs: number; traceJson: string; createdAt: string }
+export interface ModelPrice { id: string; tenantId: string; deploymentId?: string | null; model: string; inputCostPerMillionTokens: number; outputCostPerMillionTokens: number; isActive: boolean; updatedAt: string }
 export interface AuditLog { id: string; tenantId?: string | null; userId: string; apiKeyId?: string | null; action: string; resourceType: string; resourceId?: string | null; summary: string; detailsJson?: string | null; ipAddress?: string | null; userAgent?: string | null; statusCode: number; createdAt: string }
 export interface PromptProfile { id: string; tenantId: string; knowledgeBaseId?: string | null; name: string; version: number; plannerPrompt: string; answerPrompt: string; reviewerPrompt: string; isActive: boolean; updatedByUserId: string; createdAt: string; updatedAt: string }
 export interface WebhookProvider { id: string; name: string; description: string; urlPlaceholder: string; secretLabel: string; secretHint: string }
