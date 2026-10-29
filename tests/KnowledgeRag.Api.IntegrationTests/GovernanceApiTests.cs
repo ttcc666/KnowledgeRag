@@ -133,6 +133,19 @@ public sealed class GovernanceApiTests : IClassFixture<ApiFactory>
         });
         Assert.Equal(System.Net.HttpStatusCode.BadRequest, selfFallback.StatusCode);
 
+        var cyclicFallback = await client.PostAsJsonAsync($"/api/tenants/{tenantId}/ai/deployments", new
+        {
+            id = fallbackDeploymentId,
+            connectionId,
+            displayName = "Fallback Chat",
+            remoteModelName = "gpt-fallback",
+            modelType = "chat",
+            embeddingDimensions = (int?)null,
+            isEnabled = true,
+            fallbackDeploymentId = primaryDeploymentId
+        });
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, cyclicFallback.StatusCode);
+
         var saveDeploymentProfile = await client.PutAsJsonAsync($"/api/governance/knowledge-bases/{knowledgeBaseId}/rag-profile", new
         {
             enablePlanner = true,
