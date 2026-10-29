@@ -10,8 +10,12 @@ public sealed class Bm25SearchService(AppDbContext db, IOptions<RagOptions> opti
 {
     private readonly RagOptions _options = options.Value;
 
+    public Task<IReadOnlyList<HybridCandidate>> SearchAsync(Guid knowledgeBaseId, string query, int limit, CancellationToken cancellationToken = default)
+        => SearchAsync(knowledgeBaseId, Guid.Empty, query, limit, cancellationToken);
+
     public async Task<IReadOnlyList<HybridCandidate>> SearchAsync(
         Guid knowledgeBaseId,
+        Guid indexGenerationId,
         string query,
         int limit,
         CancellationToken cancellationToken = default)
@@ -21,6 +25,7 @@ public sealed class Bm25SearchService(AppDbContext db, IOptions<RagOptions> opti
 
         var raw = await LoadCorpusAsync(
             knowledgeBaseId,
+            indexGenerationId,
             Math.Max(1_000, _options.Bm25MaxCorpusChunks),
             cancellationToken);
 
@@ -82,6 +87,7 @@ public sealed class Bm25SearchService(AppDbContext db, IOptions<RagOptions> opti
 
     private async Task<IReadOnlyList<CorpusChunk>> LoadCorpusAsync(
         Guid knowledgeBaseId,
+        Guid indexGenerationId,
         int maxCorpusChunks,
         CancellationToken cancellationToken)
     {
@@ -90,7 +96,7 @@ public sealed class Bm25SearchService(AppDbContext db, IOptions<RagOptions> opti
             return await (
                 from c in db.DocumentChunks.AsNoTracking()
                 join d in db.Documents.AsNoTracking() on c.DocumentId equals d.Id
-                where c.KnowledgeBaseId == knowledgeBaseId && d.ChunkCount > 0
+                where c.KnowledgeBaseId == knowledgeBaseId && c.IndexGenerationId == indexGenerationId && d.ChunkCount > 0
                 orderby c.CreatedAt descending, c.Id descending
                 select new CorpusChunk(
                     c.Id,
@@ -112,6 +118,7 @@ public sealed class Bm25SearchService(AppDbContext db, IOptions<RagOptions> opti
                 FROM "DocumentChunks" AS c
                 INNER JOIN "Documents" AS d ON c."DocumentId" = d."Id"
                 WHERE c."KnowledgeBaseId" = {knowledgeBaseId}
+                  AND c."IndexGenerationId" = {indexGenerationId}
                   AND d."ChunkCount" > 0
                 ORDER BY julianday(c."CreatedAt") DESC, c."Id" DESC
                 LIMIT {maxCorpusChunks}
