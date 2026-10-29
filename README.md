@@ -572,7 +572,7 @@ tests/KnowledgeRag.Api.IntegrationTests
 3. Tenant API Key -> scoped KB access
 4. `knowledge:admin` API Key 不会隐式获得 `tenant:admin`
 5. 非成员无法访问他人的知识库
-6. 外部后端测试：MinIO PUT/GET/DELETE
+6. 外部后端测试：MinIO PUT/GET/DELETE（需单独启用 `RUN_EXTERNAL_S3_TESTS=1` 并提供 MinIO）
 7. 外部后端测试：pgvector upsert/search/delete
 8. 外部后端测试：PostgreSQL FTS 真实检索
 
