@@ -595,7 +595,9 @@ Tenant、成员与 API Key：
 ```text
 GET/POST          /api/tenants
 PUT/DELETE        /api/tenants/{tenantId}
-GET/PUT/DELETE    /api/tenants/{tenantId}/members
+GET               /api/tenants/{tenantId}/members
+PUT               /api/tenants/{tenantId}/members
+DELETE            /api/tenants/{tenantId}/members/{memberUserId}
 GET/POST          /api/tenants/{tenantId}/api-keys
 DELETE            /api/tenants/{tenantId}/api-keys/{apiKeyId}
 ```
@@ -619,7 +621,9 @@ Knowledge Base 与文档：
 ```text
 GET/POST          /api/knowledge-bases
 GET/PUT/DELETE    /api/knowledge-bases/{knowledgeBaseId}
-GET/PUT/DELETE    /api/knowledge-bases/{knowledgeBaseId}/members
+GET               /api/knowledge-bases/{knowledgeBaseId}/members
+PUT               /api/knowledge-bases/{knowledgeBaseId}/members
+DELETE            /api/knowledge-bases/{knowledgeBaseId}/members/{memberUserId}
 GET               /api/knowledge-bases/{knowledgeBaseId}/embedding-index
 POST              /api/knowledge-bases/{knowledgeBaseId}/embedding-index/reindex
 
@@ -657,8 +661,11 @@ GET/PUT    /api/governance/knowledge-bases/{knowledgeBaseId}/rag-profile
 GET        /api/governance/runs
 GET        /api/governance/audit
 GET/PUT    /api/governance/model-prices
-GET/POST/PUT /api/governance/prompts
-GET/POST/PUT/DELETE /api/governance/webhooks
+GET/POST   /api/governance/prompts
+PUT        /api/governance/prompts/{promptId}
+GET        /api/governance/webhooks/providers
+GET/POST   /api/governance/webhooks
+PUT/DELETE /api/governance/webhooks/{webhookId}
 POST       /api/governance/webhooks/{webhookId}/test
 GET/POST   /api/governance/evaluation/datasets
 GET/POST   /api/governance/evaluation/datasets/{datasetId}/cases
