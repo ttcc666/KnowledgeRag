@@ -15,7 +15,7 @@
 | P0 | 默认 JWT Signing Key | appsettings.json 仍保留开发占位值，但本分支 Production 启动校验会拒绝已知 SigningKey 占位值，并要求独立且至少 32 字节的 SecretProtection MasterKey。生产仍必须从 Secret Store 注入真实随机值 |
 | P1 | API 请求限流 | API 已有全局固定窗口限流；登录、注册、刷新令牌接口默认额外限制为每来源 IP 每 60 秒 10 次。限流为单实例内存计数，多实例仍需在可信 API Gateway / Reverse Proxy 统一限流 |
 | P1 | Audit Log 完整性 | AuditLogMiddleware 已移至 Authorization 之前，可记录已认证 actor 的授权拒绝和限流响应；匿名认证失败仍不会写入关联用户的 Audit Log，应结合反向代理与安全日志监控 |
-| P1 | Secret 轮换 | 新写入的 AI Credential 与 Webhook Secret 使用独立 SecretProtection MasterKey；previous master keys 与 legacy Auth keys 可在受控轮换期间解密旧密文。应用没有自动批量重加密命令，移除兼容密钥前必须重新保存并验证旧凭据 |
+| P1 | Secret 轮换 | 新写入的 AI Credential 与 Webhook Secret 使用独立 SecretProtection MasterKey；previous master keys 与 legacy Auth keys 可在受控轮换期间解密旧密文。历史无版本前缀的明文 Webhook Secret 仍为兼容读取，必须重新保存迁移；应用没有自动批量重加密命令 |
 | P1 | 上传与解析资源边界 | 已限制请求体 / 上传大小、提取文本字符数、PDF 页数与 DOCX part 字符数，并为 HTML 正则设置超时；恶意文件扫描、完整解析沙箱及所有 CPU / 内存边界仍未覆盖 |
 | P2 | TLS / CORS / Proxy / Swagger | Production 已启用 HSTS；应用层 HTTPS 重定向可配置开启，CORS 使用精确 origin allowlist，Forwarded Headers 仅接受 loopback 或明确配置的可信代理。Swagger 仅在 Development 默认开放，其他环境必须显式设置 Swagger:Enabled=true；生产开启时应再加网络访问控制 |
 | P2 | Trace / Audit 中的业务数据 | Chat / Run 会保存用户问题和答案；Timeline progress 可能包含检索 query。应按敏感业务数据管理访问、保留期和导出 |
@@ -67,7 +67,7 @@ AiCredentialProtector 使用 AES-GCM。新写入密文使用 SecretProtection:Ma
 
 ### Webhook Secret
 
-WebhookSecretProtector 新写入使用独立 MasterKey 派生的 AES-GCM 密钥，并以 enc:v2: 保存；旧 enc:v1: 密文仍通过 Auth:SigningKey 或 LegacyAuthSigningKeys 解密。API 只返回 hasSecret，不返回明文。
+WebhookSecretProtector 新写入使用独立 MasterKey 派生的 AES-GCM 密钥，并以 enc:v2: 保存；旧 enc:v1: 密文仍通过 Auth:SigningKey 或 LegacyAuthSigningKeys 解密。为兼容更早的数据，无版本前缀的旧值仍会按明文读取且不会自动迁移；应通过更新 API 重新保存这些 Secret。API 只返回 hasSecret，不返回明文。
 
 Auth SigningKey 与 SecretProtection MasterKey 已分离。轮换 Auth SigningKey 会使旧 JWT 访问令牌失效；如仍有旧的 AI/Webhook 密文，先把旧 Auth key 放入 LegacyAuthSigningKeys，再逐项通过 AI Connection / Webhook 更新 API 重新录入凭据并验证。MasterKey 轮换使用 PreviousMasterKeys；只有确认旧密文均已重新保存后才移除旧密钥。应用没有自动批量重加密命令，因此不要在没有兼容密钥或重新录入计划时直接删除旧密钥。
 

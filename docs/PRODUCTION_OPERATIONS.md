@@ -335,13 +335,13 @@ CAP 的持久数据库状态位于 PostgreSQL，但 RabbitMQ 可能存在正在 
 影响：
 
 - JWT signing / validation。
-- Webhook Secret 的 AES-GCM encryption key 派生。
+- 旧 `enc:v1:` Webhook Secret 的解密兼容性（新写入改用独立 SecretProtection MasterKey）。
 
-直接更换会让旧 JWT access token 失效。旧 `enc:v1:` Webhook Secret 与曾回退到 Auth key 加密的 AI Credential 还需要旧 Auth key 解密；轮换前把旧值暂时加入 `SECRET_PROTECTION_LEGACY_AUTH_SIGNING_KEY_1`（必要时第二个槽位），重新录入/验证相关 Secret 后再移除。轮换流程见 [Webhook Automation](WEBHOOK_AUTOMATION.md)。
+直接更换会让旧 JWT access token 失效。旧 `enc:v1:` Webhook Secret 与曾回退到 Auth key 加密的 AI Credential 还需要旧 Auth key 解密；轮换前把旧值暂时加入 `SECRET_PROTECTION_LEGACY_AUTH_SIGNING_KEY_1`（必要时第二个槽位），重新录入/验证相关 Secret 后再移除。历史无版本前缀的明文 Webhook Secret 也必须通过更新 API 重新保存，才能迁移为加密值。轮换流程见 [Webhook Automation](WEBHOOK_AUTOMATION.md)。
 
 ### `SECRET_PROTECTION_MASTER_KEY`
 
-影响 Tenant-managed AI Provider Credential。
+影响 Tenant-managed AI Provider Credential 与新写入的 Webhook Secret；两者使用不同 purpose-derived key。
 
 如果该值为空，开发/测试兼容模式会回退到 Auth Signing Key；Production 启动会拒绝空值。
 

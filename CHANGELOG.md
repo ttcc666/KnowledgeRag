@@ -50,7 +50,7 @@
 ### Security
 
 - Production 启动拒绝公开 JWT SigningKey 占位值，并要求与 JWT 密钥独立的 SecretProtection MasterKey；AI Provider Credential / Webhook Secret 支持当前与 previous key 解密以便受控轮换。
-- 新增按用户、API Key 或匿名 IP 分区的应用层 429 限流；登录、注册与刷新令牌接口默认额外限制为每来源 IP 每 60 秒 10 次，并提供可配置上限。同步加入精确 CORS allowlist、可信代理 Forwarded Headers、Production HSTS，以及非 Development 环境默认关闭 Swagger；Audit Log 在 Authorization 前记录已认证请求的授权拒绝状态。
+- 新增按用户、API Key 或匿名 IP 分区的应用层 429 限流；登录、注册与刷新令牌接口默认额外限制为每来源 IP 每 60 秒 10 次，并提供可配置上限。同步加入精确 CORS allowlist、可信代理 Forwarded Headers、Production HSTS，以及非 Development 环境默认关闭 Swagger；Audit Log 在 Authorization 前记录已认证请求的授权拒绝状态。Webhook 旧无版本前缀明文 Secret 仍为兼容读取，生产应通过更新 API 重新保存以迁移为加密密文。
 - 限制 multipart 上传请求体、解析后文本字符数、PDF 页数与 HTML 正则执行时间，降低大文件和异常文档造成资源耗尽的风险。
 
 ### Changed

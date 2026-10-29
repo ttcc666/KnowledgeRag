@@ -251,27 +251,20 @@ Webhook API 不返回明文 Secret，只返回：
 }
 ```
 
-写入时 Secret 通过 AES-GCM 加密后存库。
+写入时 Secret 通过 AES-GCM 加密后存库；新写入使用 `enc:v2:`，加密密钥由独立的 `SecretProtection:MasterKey` 派生，并使用 Webhook 专属 purpose。
 
-**重要：当前 Webhook Secret encryption key 派生自 `Auth:SigningKey`。**
+旧 `enc:v1:` 密文是由旧版 `Auth:SigningKey` 派生密钥加密的。当前实现会用当前 Auth key 或 `SecretProtection:LegacyAuthSigningKeys` 中配置的旧 Auth key 解密。为了兼容更早的未加密记录，无版本前缀的旧值仍会按明文读取；API 不会返回 Secret 明文，但这类记录不会自动迁移。
 
-因此修改：
+### 轮换流程
 
-```env
-AUTH_SIGNING_KEY
-```
+1. 轮换 `SECRET_PROTECTION_MASTER_KEY` 时，先生成新 MasterKey，并将旧值暂时加入 `SECRET_PROTECTION_PREVIOUS_MASTER_KEY_1`（需要时使用第二个槽位）。
+2. 如果还存在旧 `enc:v1:` Webhook Secret 或曾回退到 Auth key 加密的 AI Credential，在修改 `AUTH_SIGNING_KEY` **之前**，先将旧 Auth key 加入 `SECRET_PROTECTION_LEGACY_AUTH_SIGNING_KEY_1`（需要时使用第二个槽位）。
+3. 部署新配置并确认现有 Webhook Secret / AI Credential 均可解密。
+4. 通过 Webhook 更新 API 重新保存旧 Secret，通过 AI Connection 更新 API 重新保存 Provider Credential，使新密文使用当前 MasterKey。
+5. 逐个调用 Webhook Test API，并验证 AI Provider 连接。
+6. 只有确认所有旧密文已重新保存后，才移除 previous / legacy key。应用没有自动批量重加密命令。
 
-不仅会影响 JWT 签名，也会让已有 `enc:v1:` Webhook Secret 无法用新 key 解密。
-
-生产轮换 Signing Key 前应：
-
-1. 盘点所有 `hasSecret=true` 的 Webhook。
-2. 记录 / 重新获取平台机器人 Secret。
-3. 在受控维护窗口更换 Signing Key。
-4. 重新保存所有需要 Secret 的 Webhook。
-5. 逐个调用 Test API 验证。
-
-AI Provider Credential 使用另一套 `SecretProtection:MasterKey` / purpose-derived key，详见 [AI Provider Configuration](AI_PROVIDER_CONFIGURATION.md)。不要混淆两类 Secret 的轮换影响。
+`AUTH_SIGNING_KEY` 仍用于 JWT 签名与验证；直接轮换会使旧 JWT access token 失效。AI Provider Credential 使用相同的 `SecretProtection:MasterKey`，但采用独立的 purpose-derived key，详见 [AI Provider Configuration](AI_PROVIDER_CONFIGURATION.md)。
 
 ## 10. SSRF 安全策略
 
