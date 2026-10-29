@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using KnowledgeRag.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -24,22 +25,16 @@ public sealed class AuditLogAuthorizationTests(ApiFactory factory) : IClassFixtu
         var knowledgeBaseId = kbJson.RootElement.GetProperty("id").GetGuid();
 
         using var member = factory.CreateClient();
-        var memberToken = await RegisterAsync(member, $"audit-member-{Guid.NewGuid():N}@example.test");
+        var memberEmail = $"audit-member-{Guid.NewGuid():N}@example.test";
+        var memberToken = await RegisterAsync(member, memberEmail);
         member.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", memberToken);
         var memberProfile = await member.GetFromJsonAsync<JsonElement>("/api/auth/me");
         var memberId = memberProfile.GetProperty("id").GetGuid();
 
         using var addMember = await owner.PutAsJsonAsync(
             $"/api/knowledge-bases/{knowledgeBaseId}/members",
-            new { email = $"audit-member-placeholder@example.test", role = "Viewer" });
-        // The member must be added by its registered email, not a placeholder.
-        if (!addMember.IsSuccessStatusCode)
-        {
-            using var retry = await owner.PutAsJsonAsync(
-                $"/api/knowledge-bases/{knowledgeBaseId}/members",
-                new { email = memberProfile.GetProperty("email").GetString(), role = "Viewer" });
-            retry.EnsureSuccessStatusCode();
-        }
+            new { email = memberEmail, role = "Viewer" });
+        addMember.EnsureSuccessStatusCode();
 
         using var allowedRead = await member.GetAsync($"/api/knowledge-bases/{knowledgeBaseId}");
         Assert.Equal(HttpStatusCode.OK, allowedRead.StatusCode);
