@@ -114,8 +114,8 @@ KB role 独立于 Tenant role：
 | POST **/api/knowledge-bases/{knowledgeBaseId}/documents/{documentId}/cancel** | 请求取消处理，返回文档状态 | Editor |
 | GET **/api/knowledge-bases/{knowledgeBaseId}/documents/{documentId}/file** | 流式下载源文件 | Viewer |
 | DELETE **/api/knowledge-bases/{knowledgeBaseId}/documents/{documentId}** | 删除文档，成功为 204 | Editor |
-| GET **/api/knowledge-bases/{knowledgeBaseId}/embedding-index** | 当前 / 最近 Embedding generation 状态 | 已认证 + KB access service |
-| POST **/api/knowledge-bases/{knowledgeBaseId}/embedding-index/reindex** | 启动 KB-wide generation rebuild，202 Accepted | 已认证 + 服务端 KB access 校验 |
+| GET **/api/knowledge-bases/{knowledgeBaseId}/embedding-index** | 当前 / 最近 Embedding generation 状态 | KB Viewer |
+| POST **/api/knowledge-bases/{knowledgeBaseId}/embedding-index/reindex** | 启动 KB-wide generation rebuild，202 Accepted | 已登录用户 + KB Editor；API Key 会被拒绝 |
 | POST **/api/search** | JSON：knowledgeBaseId、query、可选 topK；返回 SearchHit 列表 | KB Viewer |
 
 ### Conversation、Chat 与 Streaming
