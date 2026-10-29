@@ -10,9 +10,14 @@ public sealed class KnowledgeBaseRagProfileEntity
     public bool EnableReviewer { get; set; } = true;
     public int ReviewerMaxRetries { get; set; } = 1;
     public double ReviewerMinConfidence { get; set; } = 0.65;
+    // Legacy raw model overrides remain for backward compatibility when no deployment binding exists.
     public string PlannerModel { get; set; } = string.Empty;
     public string AnswerModel { get; set; } = string.Empty;
     public string ReviewerModel { get; set; } = string.Empty;
+    public Guid? PlannerDeploymentId { get; set; }
+    public Guid? AnswerDeploymentId { get; set; }
+    public Guid? ReviewerDeploymentId { get; set; }
+    public Guid? RerankerDeploymentId { get; set; }
     public Guid? PromptProfileId { get; set; }
     public string AgentMode { get; set; } = "specialists";
     public decimal MonthlyBudgetUsd { get; set; }
@@ -33,6 +38,7 @@ public sealed class RagRunEntity
     public string Answer { get; set; } = string.Empty;
     public string Status { get; set; } = "completed";
     public string AnswerModel { get; set; } = string.Empty;
+    public Guid? AnswerDeploymentId { get; set; }
     public string AgentMode { get; set; } = "specialists";
     public int SourceCount { get; set; }
     public int EstimatedInputTokens { get; set; }
@@ -47,6 +53,8 @@ public sealed class ModelPriceEntity
 {
     public Guid Id { get; set; }
     public Guid TenantId { get; set; }
+    /// <summary>Preferred identity for provider/deployment-specific pricing. Null preserves legacy model-name pricing.</summary>
+    public Guid? DeploymentId { get; set; }
     public string Model { get; set; } = string.Empty;
     public decimal InputCostPerMillionTokens { get; set; }
     public decimal OutputCostPerMillionTokens { get; set; }
