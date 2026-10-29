@@ -30,6 +30,8 @@ public sealed class Bm25SearchServiceSqliteTests
         var knowledgeBaseId = Guid.NewGuid();
         var documentId = Guid.NewGuid();
         var chunkId = Guid.NewGuid();
+        var stagedChunkId = Guid.NewGuid();
+        var stagedGenerationId = Guid.NewGuid();
 
         db.Tenants.Add(new TenantEntity
         {
@@ -64,16 +66,28 @@ public sealed class Bm25SearchServiceSqliteTests
             CreatedAt = now,
             UpdatedAt = now
         });
-        db.DocumentChunks.Add(new DocumentChunkEntity
-        {
-            Id = chunkId,
-            KnowledgeBaseId = knowledgeBaseId,
-            DocumentId = documentId,
-            ChunkIndex = 0,
-            Text = "sqlite bm25 ordering regression token",
-            CharacterCount = 37,
-            CreatedAt = now
-        });
+        db.DocumentChunks.AddRange(
+            new DocumentChunkEntity
+            {
+                Id = chunkId,
+                KnowledgeBaseId = knowledgeBaseId,
+                DocumentId = documentId,
+                ChunkIndex = 0,
+                Text = "sqlite bm25 ordering regression token",
+                CharacterCount = 37,
+                CreatedAt = now
+            },
+            new DocumentChunkEntity
+            {
+                Id = stagedChunkId,
+                KnowledgeBaseId = knowledgeBaseId,
+                DocumentId = documentId,
+                IndexGenerationId = stagedGenerationId,
+                ChunkIndex = 0,
+                Text = "sqlite bm25 staging regression token",
+                CharacterCount = 36,
+                CreatedAt = now.AddSeconds(1)
+            });
         await db.SaveChangesAsync();
 
         var service = new Bm25SearchService(
@@ -87,5 +101,10 @@ public sealed class Bm25SearchServiceSqliteTests
         Assert.Equal(documentId, hit.DocumentId);
         Assert.Equal("sqlite-bm25.txt", hit.FileName);
         Assert.True(hit.Bm25Score > 0);
+
+        var stagedResults = await service.SearchAsync(knowledgeBaseId, stagedGenerationId, "regression", 5);
+        var stagedHit = Assert.Single(stagedResults);
+        Assert.Equal(stagedChunkId, stagedHit.PointId);
+        Assert.NotEqual(hit.PointId, stagedHit.PointId);
     }
 }
