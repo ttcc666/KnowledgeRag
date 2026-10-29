@@ -21,6 +21,19 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Apply governance hardening
         run: python3 scripts/pr3-governance-hardening.py
+      - name: Fix integration test EF extension import
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('tests/KnowledgeRag.Api.IntegrationTests/GovernanceApiTests.cs')
+          s = p.read_text()
+          marker = 'using Microsoft.Extensions.DependencyInjection;\n'
+          if 'using Microsoft.EntityFrameworkCore;' not in s:
+              if marker not in s:
+                  raise SystemExit('dependency injection using marker not found')
+              s = s.replace(marker, 'using Microsoft.EntityFrameworkCore;\n' + marker, 1)
+          p.write_text(s)
+          PY
       - name: Install EF CLI
         run: dotnet tool install --global dotnet-ef --version 10.0.14
       - name: Restore
@@ -45,9 +58,7 @@ jobs:
           if s.count(marker) != 1:
               raise SystemExit('migration Up marker mismatch')
           s = s.replace(marker, marker + '            var guidColumnType = ActiveProvider.Contains("Npgsql", StringComparison.Ordinal) ? "uuid" : "TEXT";\n\n', 1)
-          # Every Guid added by this migration is a FK to a Guid principal and must match provider type.
           s = re.sub(r'(migrationBuilder\.AddColumn<Guid>\([\s\S]*?type: )"TEXT"(,[\s\S]*?\);)', r'\1guidColumnType\2', s)
-          # Other generated SQLite affinity strings should delegate to the active provider.
           s = s.replace('type: "TEXT",\n                maxLength:', 'type: null,\n                maxLength:')
           s = s.replace('type: "TEXT",\n                nullable: true);', 'type: null,\n                nullable: true);')
           s = s.replace('defaultValue: "");', 'defaultValue: "unknown");')
