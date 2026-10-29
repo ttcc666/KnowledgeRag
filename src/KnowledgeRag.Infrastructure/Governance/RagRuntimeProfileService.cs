@@ -27,16 +27,22 @@ public sealed record ResolvedRagProfile(
     string? AnswerPrompt,
     string? ReviewerPrompt)
 {
-    public ResolvedAiEndpoint ChatEndpoint { get; init; } = new(
+    private static readonly ResolvedAiEndpoint PlatformDefault = new(
         null, null, AiProviderTypes.OpenAiCompatible, "https://api.openai.com/v1", string.Empty, "gpt-4o-mini", 0, false);
+
+    // ChatEndpoint remains as a compatibility alias for code/tests that predate role-specific routing.
+    public ResolvedAiEndpoint ChatEndpoint { get; init; } = PlatformDefault;
+    public ResolvedAiEndpoint PlannerEndpoint { get; init; } = PlatformDefault;
+    public ResolvedAiEndpoint AnswerEndpoint { get; init; } = PlatformDefault;
+    public ResolvedAiEndpoint ReviewerEndpoint { get; init; } = PlatformDefault;
     public ResolvedAiEndpoint? RerankerEndpoint { get; init; }
+    public EmbeddingEndpointResolution? EmbeddingEndpoint { get; init; }
 }
 
 /// <summary>
-/// Resolves an immutable RAG execution snapshot once per scoped request. Conversation budget
-/// reservation, Agent execution and Evaluation therefore observe the exact same model/prompt/policy
-/// values even if an administrator updates the persisted profile or tenant AI connection concurrently.
-/// Provider secrets stay in-memory inside the scoped snapshot and are never persisted to traces.
+/// Resolves one immutable RAG execution snapshot per scoped request. Explicit deployment bindings
+/// are resolved (including deterministic persisted-health fallback) before budget reservation and
+/// Agent execution. No provider/network health decision is made mid-run.
 /// </summary>
 public sealed class RagRuntimeProfileService(
     AppDbContext db,
@@ -52,11 +58,12 @@ public sealed class RagRuntimeProfileService(
     {
         if (_resolved.TryGetValue(knowledgeBaseId, out var cached)) return cached;
 
-        var tenantId = await db.KnowledgeBases.AsNoTracking()
+        var knowledgeBase = await db.KnowledgeBases.AsNoTracking()
             .Where(x => x.Id == knowledgeBaseId)
-            .Select(x => x.TenantId)
-            .SingleOrDefaultAsync(ct);
-        if (tenantId == Guid.Empty) throw new KeyNotFoundException("知识库不存在。");
+            .Select(x => new { x.TenantId, x.ActiveIndexGenerationId })
+            .SingleOrDefaultAsync(ct)
+            ?? throw new KeyNotFoundException("知识库不存在。");
+        var tenantId = knowledgeBase.TenantId;
 
         var profile = await db.Set<KnowledgeBaseRagProfileEntity>().AsNoTracking()
             .SingleOrDefaultAsync(x => x.KnowledgeBaseId == knowledgeBaseId, ct);
@@ -70,18 +77,17 @@ public sealed class RagRuntimeProfileService(
             .FirstOrDefaultAsync(ct);
 
         var tenantChat = await tenantAiProviders.ResolveDefaultEndpointAsync(tenantId, AiModelTypes.Chat, ct);
-        var chatEndpoint = tenantChat ?? PlatformChatEndpoint();
-        var rerankerEndpoint = await tenantAiProviders.ResolveDefaultEndpointAsync(tenantId, AiModelTypes.Rerank, ct);
-
-        var plannerModel = string.IsNullOrWhiteSpace(profile?.PlannerModel)
-            ? tenantChat?.Model ?? _ai.ResolvePlannerModel()
-            : profile!.PlannerModel;
-        var answerModel = string.IsNullOrWhiteSpace(profile?.AnswerModel)
-            ? tenantChat?.Model ?? _ai.ResolveAnswerModel()
-            : profile!.AnswerModel;
-        var reviewerModel = string.IsNullOrWhiteSpace(profile?.ReviewerModel)
-            ? tenantChat?.Model ?? _ai.ResolveReviewerModel()
-            : profile!.ReviewerModel;
+        var plannerEndpoint = await ResolveChatRoleAsync(
+            tenantId, profile?.PlannerDeploymentId, profile?.PlannerModel, tenantChat, _ai.ResolvePlannerModel(), ct);
+        var answerEndpoint = await ResolveChatRoleAsync(
+            tenantId, profile?.AnswerDeploymentId, profile?.AnswerModel, tenantChat, _ai.ResolveAnswerModel(), ct);
+        var reviewerEndpoint = await ResolveChatRoleAsync(
+            tenantId, profile?.ReviewerDeploymentId, profile?.ReviewerModel, tenantChat, _ai.ResolveReviewerModel(), ct);
+        var rerankerEndpoint = profile?.RerankerDeploymentId is Guid rerankerDeploymentId
+            ? await tenantAiProviders.ResolveEndpointWithFallbackAsync(tenantId, rerankerDeploymentId, AiModelTypes.Rerank, ct)
+            : await tenantAiProviders.ResolveDefaultEndpointAsync(tenantId, AiModelTypes.Rerank, ct);
+        var embeddingEndpoint = await tenantAiProviders.ResolveEmbeddingEndpointForGenerationAsync(
+            knowledgeBaseId, knowledgeBase.ActiveIndexGenerationId, ct);
 
         var resolved = new ResolvedRagProfile(
             profile?.EnablePlanner ?? _rag.EnablePlanner,
@@ -91,9 +97,9 @@ public sealed class RagRuntimeProfileService(
             profile?.EnableReviewer ?? _rag.EnableReviewer,
             Math.Clamp(profile?.ReviewerMaxRetries ?? _rag.ReviewerMaxRetries, 0, 3),
             Math.Clamp(profile?.ReviewerMinConfidence ?? _rag.ReviewerMinConfidence, 0, 1),
-            plannerModel,
-            answerModel,
-            reviewerModel,
+            plannerEndpoint.Model,
+            answerEndpoint.Model,
+            reviewerEndpoint.Model,
             string.IsNullOrWhiteSpace(profile?.AgentMode) ? "specialists" : profile!.AgentMode,
             profile?.MonthlyBudgetUsd ?? 0,
             profile?.DailyRunLimit ?? 0,
@@ -102,30 +108,72 @@ public sealed class RagRuntimeProfileService(
             AppendMandatoryPolicy(prompt?.AnswerPrompt, AnswerCitationPolicy),
             AppendMandatoryPolicy(prompt?.ReviewerPrompt, ReviewerCitationPolicy))
         {
-            ChatEndpoint = chatEndpoint,
-            RerankerEndpoint = rerankerEndpoint
+            ChatEndpoint = answerEndpoint,
+            PlannerEndpoint = plannerEndpoint,
+            AnswerEndpoint = answerEndpoint,
+            ReviewerEndpoint = reviewerEndpoint,
+            RerankerEndpoint = rerankerEndpoint,
+            EmbeddingEndpoint = embeddingEndpoint
         };
 
         _resolved[knowledgeBaseId] = resolved;
         return resolved;
     }
 
-    public async Task<decimal> EstimateCostAsync(Guid tenantId, string model, int inputTokens, int outputTokens, CancellationToken ct = default)
+    public Task<decimal> EstimateCostAsync(
+        Guid tenantId,
+        string model,
+        int inputTokens,
+        int outputTokens,
+        CancellationToken ct = default)
+        => EstimateCostAsync(tenantId, model, null, inputTokens, outputTokens, ct);
+
+    public async Task<decimal> EstimateCostAsync(
+        Guid tenantId,
+        string model,
+        Guid? deploymentId,
+        int inputTokens,
+        int outputTokens,
+        CancellationToken ct = default)
     {
-        // SQLite cannot translate DateTimeOffset ORDER BY. Keep provider-neutral filtering in SQL,
-        // then select the newest matching price in memory. PostgreSQL follows the same path so
-        // cost selection semantics stay consistent across supported database providers.
         var prices = await db.Set<ModelPriceEntity>().AsNoTracking()
-            .Where(x => x.TenantId == tenantId && x.Model == model && x.IsActive)
+            .Where(x => x.TenantId == tenantId && x.IsActive &&
+                        ((deploymentId.HasValue && x.DeploymentId == deploymentId) ||
+                         (!x.DeploymentId.HasValue && x.Model == model)))
             .ToListAsync(ct);
-        var price = prices.OrderByDescending(x => x.UpdatedAt).FirstOrDefault();
+        var price = deploymentId.HasValue
+            ? prices.Where(x => x.DeploymentId == deploymentId).OrderByDescending(x => x.UpdatedAt).FirstOrDefault()
+              ?? prices.Where(x => x.DeploymentId == null && x.Model == model).OrderByDescending(x => x.UpdatedAt).FirstOrDefault()
+            : prices.Where(x => x.DeploymentId == null && x.Model == model).OrderByDescending(x => x.UpdatedAt).FirstOrDefault();
         var inputRate = price?.InputCostPerMillionTokens ?? _ai.ChatInputCostPerMillionTokens;
         var outputRate = price?.OutputCostPerMillionTokens ?? _ai.ChatOutputCostPerMillionTokens;
         return inputTokens / 1_000_000m * inputRate + outputTokens / 1_000_000m * outputRate;
     }
 
-    private ResolvedAiEndpoint PlatformChatEndpoint()
-        => new(null, null, AiProviderTypes.OpenAiCompatible, _ai.BaseUrl, _ai.ApiKey, _ai.ChatModel, 0, false);
+    private async Task<ResolvedAiEndpoint> ResolveChatRoleAsync(
+        Guid tenantId,
+        Guid? deploymentId,
+        string? legacyModel,
+        ResolvedAiEndpoint? tenantDefault,
+        string platformModel,
+        CancellationToken ct)
+    {
+        if (deploymentId is Guid explicitDeploymentId)
+            return await tenantAiProviders.ResolveEndpointWithFallbackAsync(tenantId, explicitDeploymentId, AiModelTypes.Chat, ct);
+
+        if (!string.IsNullOrWhiteSpace(legacyModel))
+        {
+            var baseEndpoint = tenantDefault ?? PlatformChatEndpoint(platformModel);
+            // A raw model override is not a deployment identity. Preserve the historical endpoint
+            // behavior but do not charge it against the tenant default deployment's price.
+            return baseEndpoint with { DeploymentId = null, Model = legacyModel.Trim() };
+        }
+
+        return tenantDefault ?? PlatformChatEndpoint(platformModel);
+    }
+
+    private ResolvedAiEndpoint PlatformChatEndpoint(string model)
+        => new(null, null, AiProviderTypes.OpenAiCompatible, _ai.BaseUrl, _ai.ApiKey, model, 0, false);
 
     private static string? NullIfWhiteSpace(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 

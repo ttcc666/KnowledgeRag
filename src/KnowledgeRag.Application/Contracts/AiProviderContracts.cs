@@ -31,7 +31,11 @@ public sealed record AiModelDeploymentSummary(
     string ModelType,
     int? EmbeddingDimensions,
     bool IsEnabled,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    Guid? FallbackDeploymentId,
+    string HealthStatus,
+    DateTimeOffset? LastHealthCheckedAt,
+    string? LastHealthError);
 
 public sealed record SaveAiModelDeploymentRequest(
     Guid? Id,
@@ -40,7 +44,8 @@ public sealed record SaveAiModelDeploymentRequest(
     string RemoteModelName,
     string ModelType,
     int? EmbeddingDimensions,
-    bool IsEnabled = true);
+    bool IsEnabled = true,
+    Guid? FallbackDeploymentId = null);
 
 public sealed record TenantAiDefaultsSummary(
     Guid TenantId,
@@ -55,3 +60,10 @@ public sealed record SaveTenantAiDefaultsRequest(
     Guid? DefaultRerankerDeploymentId);
 
 public sealed record AiConnectionTestResult(bool Success, string Message);
+
+public sealed record AiDeploymentHealthResult(
+    Guid DeploymentId,
+    bool Success,
+    string Status,
+    string Message,
+    DateTimeOffset CheckedAt);

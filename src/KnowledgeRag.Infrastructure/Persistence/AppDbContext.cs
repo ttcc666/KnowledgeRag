@@ -87,10 +87,14 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(x => x.DisplayName).HasMaxLength(200);
             entity.Property(x => x.RemoteModelName).HasMaxLength(200);
             entity.Property(x => x.ModelType).HasMaxLength(32);
+            entity.Property(x => x.HealthStatus).HasMaxLength(32);
+            entity.Property(x => x.LastHealthError).HasMaxLength(1000);
             entity.HasIndex(x => new { x.TenantId, x.ModelType, x.IsEnabled });
+            entity.HasIndex(x => new { x.TenantId, x.HealthStatus });
             entity.HasIndex(x => new { x.TenantId, x.ConnectionId, x.DisplayName }).IsUnique();
             entity.HasOne<TenantEntity>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne<AiProviderConnectionEntity>().WithMany().HasForeignKey(x => x.ConnectionId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<AiModelDeploymentEntity>().WithMany().HasForeignKey(x => x.FallbackDeploymentId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<TenantAiDefaultsEntity>(entity =>
@@ -241,6 +245,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(x => x.ReviewerModel).HasMaxLength(200);
             entity.Property(x => x.AgentMode).HasMaxLength(64);
             entity.HasOne<KnowledgeBaseEntity>().WithOne().HasForeignKey<KnowledgeBaseRagProfileEntity>(x => x.KnowledgeBaseId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<AiModelDeploymentEntity>().WithMany().HasForeignKey(x => x.PlannerDeploymentId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<AiModelDeploymentEntity>().WithMany().HasForeignKey(x => x.AnswerDeploymentId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<AiModelDeploymentEntity>().WithMany().HasForeignKey(x => x.ReviewerDeploymentId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<AiModelDeploymentEntity>().WithMany().HasForeignKey(x => x.RerankerDeploymentId).OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<RagRunEntity>(entity =>
@@ -255,6 +263,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasOne<TenantEntity>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne<KnowledgeBaseEntity>().WithMany().HasForeignKey(x => x.KnowledgeBaseId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne<ConversationEntity>().WithMany().HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<AiModelDeploymentEntity>().WithMany().HasForeignKey(x => x.AnswerDeploymentId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<ModelPriceEntity>(entity =>
@@ -262,8 +271,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.ToTable("ModelPrices");
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Model).HasMaxLength(200);
-            entity.HasIndex(x => new { x.TenantId, x.Model }).IsUnique();
+            entity.HasIndex(x => new { x.TenantId, x.Model });
+            entity.HasIndex(x => new { x.TenantId, x.DeploymentId }).IsUnique();
             entity.HasOne<TenantEntity>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<AiModelDeploymentEntity>().WithMany().HasForeignKey(x => x.DeploymentId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<AuditLogEntity>(entity =>

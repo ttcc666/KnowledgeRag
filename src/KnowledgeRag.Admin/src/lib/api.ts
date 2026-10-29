@@ -1,7 +1,7 @@
 import axios, { AxiosError, type AxiosRequestConfig } from 'axios'
 import { useAuthStore } from '@/stores/auth-store'
 import type {
-  AiConnectionTestResult, AiModelDeployment, AiModelType, AiProviderConnection, AiProviderDescriptor, ApiKeySummary, AuditLog,
+  AiConnectionTestResult, AiDeploymentHealthResult, AiModelDeployment, AiModelType, AiProviderConnection, AiProviderDescriptor, ApiKeySummary, AuditLog,
   AuthResponse, ChatMessage, ChatMessagePage, ChatResponse, Conversation, CreatedApiKey, DashboardSummary, EvaluationCase,
   EvaluationDataset, EvaluationExpectedSource, EvaluationRun, GovernanceOverview, IngestionJobSummary, KnowledgeBaseMember,
   KnowledgeBaseIndexGenerationSummary, KnowledgeBaseSummary, KnowledgeDocument, ModelPrice, ProductSettingsSummary, PromptProfile, RagProfile, RagProfileUpdate,
@@ -70,8 +70,9 @@ export const api = {
     deleteAiConnection: async (tenantId: string, id: string) => { await http.delete(`/api/tenants/${tenantId}/ai/connections/${id}`) },
     testAiConnection: async (tenantId: string, id: string) => (await http.post<AiConnectionTestResult>(`/api/tenants/${tenantId}/ai/connections/${id}/test`)).data,
     aiDeployments: async (tenantId: string) => (await http.get<AiModelDeployment[]>(`/api/tenants/${tenantId}/ai/deployments`)).data,
-    saveAiDeployment: async (tenantId: string, body: { id?: string | null; connectionId: string; displayName: string; remoteModelName: string; modelType: AiModelType; embeddingDimensions?: number | null; isEnabled: boolean }) => (await http.post<AiModelDeployment>(`/api/tenants/${tenantId}/ai/deployments`, body)).data,
+    saveAiDeployment: async (tenantId: string, body: { id?: string | null; connectionId: string; displayName: string; remoteModelName: string; modelType: AiModelType; embeddingDimensions?: number | null; isEnabled: boolean; fallbackDeploymentId?: string | null }) => (await http.post<AiModelDeployment>(`/api/tenants/${tenantId}/ai/deployments`, body)).data,
     deleteAiDeployment: async (tenantId: string, id: string) => { await http.delete(`/api/tenants/${tenantId}/ai/deployments/${id}`) },
+    testAiDeployment: async (tenantId: string, id: string) => (await http.post<AiDeploymentHealthResult>(`/api/tenants/${tenantId}/ai/deployments/${id}/health`)).data,
     aiDefaults: async (tenantId: string) => (await http.get<TenantAiDefaults>(`/api/tenants/${tenantId}/ai/defaults`)).data,
     saveAiDefaults: async (tenantId: string, body: { defaultChatDeploymentId?: string | null; defaultEmbeddingDeploymentId?: string | null; defaultRerankerDeploymentId?: string | null }) => (await http.put<TenantAiDefaults>(`/api/tenants/${tenantId}/ai/defaults`, body)).data,
   },
@@ -101,7 +102,7 @@ export const api = {
     runs: async (knowledgeBaseId: string) => (await http.get<RagRun[]>('/api/governance/runs', { params: { knowledgeBaseId } })).data,
     audit: async (tenantId: string) => (await http.get<AuditLog[]>('/api/governance/audit', { params: { tenantId } })).data,
     modelPrices: async (tenantId: string) => (await http.get<ModelPrice[]>('/api/governance/model-prices', { params: { tenantId } })).data,
-    saveModelPrice: async (tenantId: string, body: { model: string; inputCostPerMillionTokens: number; outputCostPerMillionTokens: number; isActive?: boolean }) => (await http.put<ModelPrice>('/api/governance/model-prices', body, { params: { tenantId } })).data,
+    saveModelPrice: async (tenantId: string, body: { model: string; deploymentId?: string | null; inputCostPerMillionTokens: number; outputCostPerMillionTokens: number; isActive?: boolean }) => (await http.put<ModelPrice>('/api/governance/model-prices', body, { params: { tenantId } })).data,
     prompts: async (tenantId: string) => (await http.get<PromptProfile[]>('/api/governance/prompts', { params: { tenantId } })).data,
     savePrompt: async (tenantId: string, body: { id?: string | null; knowledgeBaseId?: string | null; name: string; plannerPrompt: string; answerPrompt: string; reviewerPrompt: string; isActive: boolean }) => (await http.post<PromptProfile>('/api/governance/prompts', body, { params: { tenantId } })).data,
     webhookProviders: async () => (await http.get<WebhookProvider[]>('/api/governance/webhooks/providers')).data,

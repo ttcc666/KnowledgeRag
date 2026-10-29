@@ -9,3 +9,6 @@ src/KnowledgeRag.Api/App_Data/files/*
 
 src/KnowledgeRag.Admin/node_modules/
 src/KnowledgeRag.Admin/dist/
+src/KnowledgeRag.Admin/test-results/
+src/KnowledgeRag.Admin/playwright-report/
+src/KnowledgeRag.Admin/tsconfig.tsbuildinfo

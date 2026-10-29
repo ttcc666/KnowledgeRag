@@ -86,8 +86,6 @@ public sealed class RagRunAccountingService(
             }
             catch (Exception ex) when (attempt < 2 && IsSerializationConflict(ex))
             {
-                // Only detach accounting rows. Clearing the whole request DbContext would also
-                // detach the Conversation that must be updated after the Agent finishes.
                 foreach (var entry in db.ChangeTracker.Entries<RagRunEntity>().ToList())
                     entry.State = EntityState.Detached;
                 await Task.Delay(25 * (attempt + 1), ct);
@@ -124,6 +122,7 @@ public sealed class RagRunAccountingService(
                 inputTokens,
                 outputTokens,
                 costUsd = cost,
+                answerDeploymentId = profile.AnswerEndpoint.DeploymentId,
                 lineItems
             }
         }).ToArray();
@@ -132,6 +131,7 @@ public sealed class RagRunAccountingService(
         run.Answer = answer;
         run.Status = status;
         run.AnswerModel = profile.AnswerModel;
+        run.AnswerDeploymentId = profile.AnswerEndpoint.DeploymentId;
         run.AgentMode = profile.AgentMode;
         run.SourceCount = sourceCount;
         run.EstimatedInputTokens = inputTokens;
@@ -165,6 +165,7 @@ public sealed class RagRunAccountingService(
             Answer = string.Empty,
             Status = "reserved",
             AnswerModel = profile.AnswerModel,
+            AnswerDeploymentId = profile.AnswerEndpoint.DeploymentId,
             AgentMode = profile.AgentMode,
             SourceCount = 0,
             EstimatedInputTokens = reservationLines.Sum(x => x.InputTokens),
@@ -178,6 +179,7 @@ public sealed class RagRunAccountingService(
                     type = "usage.reservation",
                     estimated = true,
                     reservedCostUsd = reservationCost,
+                    answerDeploymentId = profile.AnswerEndpoint.DeploymentId,
                     lineItems = reservationLines
                 }
             }, WebJson),
@@ -193,25 +195,36 @@ public sealed class RagRunAccountingService(
 
         foreach (var estimate in estimates)
         {
+            var deploymentPrice = estimate.DeploymentId is Guid deploymentId
+                ? explicitPrices.Where(x => x.DeploymentId == deploymentId).OrderByDescending(x => x.UpdatedAt).FirstOrDefault()
+                : null;
+            var legacyModelPrice = explicitPrices
+                .Where(x => x.DeploymentId == null && string.Equals(x.Model, estimate.Model, StringComparison.Ordinal))
+                .OrderByDescending(x => x.UpdatedAt)
+                .FirstOrDefault();
+            var price = deploymentPrice ?? legacyModelPrice;
+
             decimal cost;
             if (string.Equals(estimate.Operation, "embedding", StringComparison.OrdinalIgnoreCase))
             {
-                // Chat pricing is not a safe fallback for embedding models. Embedding cost is
-                // zero until the tenant explicitly configures that model in Model Prices.
-                var price = explicitPrices
-                    .Where(x => string.Equals(x.Model, estimate.Model, StringComparison.Ordinal))
-                    .OrderByDescending(x => x.UpdatedAt)
-                    .FirstOrDefault();
+                // Chat pricing is never a safe fallback for embeddings. Deployment/model price must
+                // be configured explicitly; otherwise embedding is conservatively recorded as zero.
                 cost = price is null
                     ? 0
                     : estimate.InputTokens / 1_000_000m * price.InputCostPerMillionTokens +
                       estimate.OutputTokens / 1_000_000m * price.OutputCostPerMillionTokens;
+            }
+            else if (price is not null)
+            {
+                cost = estimate.InputTokens / 1_000_000m * price.InputCostPerMillionTokens +
+                       estimate.OutputTokens / 1_000_000m * price.OutputCostPerMillionTokens;
             }
             else
             {
                 cost = await runtimeProfiles.EstimateCostAsync(
                     tenantId,
                     estimate.Model,
+                    estimate.DeploymentId,
                     estimate.InputTokens,
                     estimate.OutputTokens,
                     ct);
@@ -224,7 +237,9 @@ public sealed class RagRunAccountingService(
                 estimate.InputTokens,
                 estimate.OutputTokens,
                 decimal.Round(cost, 8),
-                estimate.Estimated));
+                estimate.Estimated,
+                estimate.DeploymentId,
+                estimate.ProviderType));
         }
         return result;
     }
